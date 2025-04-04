@@ -30,7 +30,7 @@ CONFIGURE_ARGS="--enable-archs=i386,x86_64 \
 				--with-xinput2 \
     				--enable-nls \
 				--without-xshm \
-				--with-xxf86vm \
+				--without-xxf86vm \
 				--without-osmesa \
 				--without-usb \
 				--without-sdl \
