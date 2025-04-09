@@ -4,7 +4,7 @@ PKG_PRETTY_NAME="Wine ($PKG_VER)"
 BLACKLIST_ARCHITECTURE=aarch64
 
 GIT_URL="https://github.com/GloriousEggroll/wine-ge-custom.git"
-GIT_COMMIT="GE-Proton7-15"
+GIT_COMMIT="8aebc458014a5fd4741d83711ae812493aef7ef2"
 
 HOST_BUILD_CONFIGURE_ARGS="--enable-win64 --without-x"
 HOST_BUILD_FOLDER="$INIT_DIR/workdir/$package/wine-tools"
