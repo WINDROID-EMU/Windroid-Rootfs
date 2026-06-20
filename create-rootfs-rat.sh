@@ -94,7 +94,7 @@ done
 
 mv new_makeSymlinks.sh makeSymlinks.sh
 
-$INIT_DIR/tools/create-rat-pkg.sh "MiceWine-RootFS" "MiceWine RootFS" "" "$ARCH" "($GIT_SHORT_SHA)" "rootfs" "$PWD" "$INIT_DIR"
+$INIT_DIR/tools/create-rat-pkg.sh "Windroid-RootFS" "Windroid RootFS" "" "$ARCH" "($GIT_SHORT_SHA)" "rootfs" "$PWD" "$INIT_DIR"
 
 cd "$INIT_DIR"
 
