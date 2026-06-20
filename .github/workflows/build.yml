@@ -1,4 +1,4 @@
-name: Build and Release MiceWine RootFS
+name: Build and Release Windroid RootFS
 
 on:
   push:
@@ -9,6 +9,9 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
 
     steps:
 
@@ -33,44 +36,47 @@ jobs:
 
     - name: "Copy Repository to Chroot"
       run: |
-        sudo cp -rf $PWD /mnt/arch/MiceWine-RootFS-Generator
+        sudo cp -rf $PWD /mnt/arch/Windroid-RootFS-Generator
 
     - name: "Download Latest Release Rat Packages"
       run: |
-        curl -LO# https://github.com/KreitinnSoftware/MiceWine-RootFS-Generator/releases/download/$(curl -s https://api.github.com/repos/KreitinnSoftware/MiceWine-RootFS-Generator/releases | grep tag_name -m 1 | cut -d ":" -f 2 | sed "s/\"//g" | sed "s/,//g" | sed "s/ //g")/MiceWine-Packages.zip || true
-        sudo unzip -o MiceWine-Packages.zip -d /mnt/arch/MiceWine-RootFS-Generator/built-pkgs || true
-        rm -f MiceWine-Packages.zip
+        curl -LO# https://github.com/KreitinnSoftware/Windroid-RootFS-Generator/releases/download/$(curl -s https://api.github.com/repos/KreitinnSoftware/Windroid-RootFS-Generator/releases | grep tag_name -m 1 | cut -d ":" -f 2 | sed "s/\"//g" | sed "s/,//g" | sed "s/ //g")/Windroid-Packages.zip || true
+        sudo unzip -o Windroid-Packages.zip -d /mnt/arch/Windroid-RootFS-Generator/built-pkgs || true
+        rm -f Windroid-Packages.zip
 
     - name: "Setup Basic Android (x86_64) Runtime Environment (Required for Building x86_64 glib)"
       run: |
         git clone https://github.com/termux/termux-docker.git
+        cd termux-docker
+        git checkout 148b93d989cbc572719e050135b3e13f115f2a8e^
+        cd ..
         sudo cp -rf termux-docker/system/x86 /mnt/arch/system
         sudo chown -R $(whoami):$(whoami) /mnt/arch/system
         sudo chmod 755 -R /mnt/arch/system
 
     - name: "Start Building (x86_64)"
       run: |
-        sudo arch-chroot /mnt/arch bash -c "cd /MiceWine-RootFS-Generator && ./build-all.sh x86_64 --ci && cd logs && 7z a /MiceWine-RootFS-$(git rev-parse --short HEAD)-x86_64-Logs.zip"
+        sudo arch-chroot /mnt/arch bash -c "cd /Windroid-RootFS-Generator && ./build-all.sh x86_64 --ci && cd logs && 7z a /Windroid-RootFS-$(git rev-parse --short HEAD)-x86_64-Logs.zip"
 
     - name: "Create RootFS File (x86_64)"
       run: |
-        sudo arch-chroot /mnt/arch bash -c "cd /MiceWine-RootFS-Generator && ./create-rootfs-rat.sh x86_64 && mv MiceWine-RootFS-\($(git rev-parse --short HEAD)\)-x86_64.rat /MiceWine-RootFS-$(git rev-parse --short HEAD)-x86_64.rat"
+        sudo arch-chroot /mnt/arch bash -c "cd /Windroid-RootFS-Generator && ./create-rootfs-rat.sh x86_64 && mv Windroid-RootFS-\($(git rev-parse --short HEAD)\)-x86_64.rat /Windroid-RootFS-$(git rev-parse --short HEAD)-x86_64.rat"
 
     - name: "Clean (x86_64) RootFS"
       run: |
-        sudo rm -rf /mnt/arch/data /mnt/arch/MiceWine-RootFS-Generator/workdir /mnt/arch/MiceWine-RootFS-Generator/rootfs
+        sudo rm -rf /mnt/arch/data /mnt/arch/Windroid-RootFS-Generator/workdir /mnt/arch/Windroid-RootFS-Generator/rootfs
 
     - name: "Start Building (aarch64)"
       run: |
-        sudo arch-chroot /mnt/arch bash -c "cd /MiceWine-RootFS-Generator && ./build-all.sh aarch64 --ci && cd logs && 7z a /MiceWine-RootFS-$(git rev-parse --short HEAD)-aarch64-Logs.zip"
+        sudo arch-chroot /mnt/arch bash -c "cd /Windroid-RootFS-Generator && ./build-all.sh aarch64 --ci && cd logs && 7z a /Windroid-RootFS-$(git rev-parse --short HEAD)-aarch64-Logs.zip"
 
     - name: "Create RootFS File (aarch64)"
       run: |
-        sudo arch-chroot /mnt/arch bash -c "cd /MiceWine-RootFS-Generator && ./create-rootfs-rat.sh aarch64 && mv MiceWine-RootFS-\($(git rev-parse --short HEAD)\)-aarch64.rat /MiceWine-RootFS-$(git rev-parse --short HEAD)-aarch64.rat"
+        sudo arch-chroot /mnt/arch bash -c "cd /Windroid-RootFS-Generator && ./create-rootfs-rat.sh aarch64 && mv Windroid-RootFS-\($(git rev-parse --short HEAD)\)-aarch64.rat /Windroid-RootFS-$(git rev-parse --short HEAD)-aarch64.rat"
 
     - name: "Save Rat Packages"
       run: |
-        sudo arch-chroot /mnt/arch bash -c "cd /MiceWine-RootFS-Generator/built-pkgs && 7z a /MiceWine-Packages.zip"
+        sudo arch-chroot /mnt/arch bash -c "cd /Windroid-RootFS-Generator/built-pkgs && 7z a /Windroid-Packages.zip"
 
     - name: "Get Short SHA"
       run: |
@@ -79,7 +85,7 @@ jobs:
     - name: "Create Release"
       uses: softprops/action-gh-release@v1
       with:
-        name: "MiceWine RootFS (${{ env.SHORT_SHA }})"
+        name: "Windroid RootFS (${{ env.SHORT_SHA }})"
         tag_name: ${{ env.SHORT_SHA }}
         prerelease: true
         files: |
