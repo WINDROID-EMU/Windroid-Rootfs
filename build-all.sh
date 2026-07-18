@@ -31,7 +31,7 @@ setupBuildEnv()
 		fi
 		echo "Unpacking MinGW..."
 		tar -xf "cache/$MINGW_FILENAME" -C "cache"
-		mv "cache/$(tar -tf "cache/$MINGW_FILENAME" | cut -d "/" -f 1 | head -n 1)/$(tar -tf "cache/$MINGW_FILENAME" | cut -d "/" -f 2 | head -n 1)" "cache/mingw"
+		mv "cache/$(tar -tf "cache/$MINGW_FILENAME" | cut -d "/" -f 1 | head -n 1)" "cache/mingw"
 		rm -f "cache/$MINGW_FILENAME"
 		echo ""
 	fi
@@ -545,9 +545,9 @@ fi
 export NDK_URL="https://dl.google.com/android/repository/android-ndk-r26b-linux.zip"
 export NDK_FILENAME="${NDK_URL##*/}"
 export NDK_SHA512="233e0b34c946a1ba60022809536307613ed956a4d596b3f43dc75e752b9d973f7c07f03a404a72a893629b86d8046664b9020920b3a6c64f68e223c5da109ec5"
-export MINGW_URL="http://techer.pascal.free.fr/Red-Rose_MinGW-w64-Toolchain/Red-Rose-MinGW-w64-Posix-Urct-v12.0.0.r458.g03d8a40f5-Gcc-11.5.0.tar.xz"
+export MINGW_URL="https://github.com/mstorsjo/llvm-mingw/releases/download/20260324/llvm-mingw-20260324-ucrt-ubuntu-22.04-x86_64.tar.xz"
 export MINGW_FILENAME="${MINGW_URL##*/}"
-export MINGW_SHA512="c92e8d4c5811ad82d457a5618f902c2f7e951aa4e3e1cbd640be243ac4d1810e26ea7a933cb2b4b28cda715c04a7f6453060e1b13dd6bf953b69e6ea5ec75c93"
+export MINGW_SHA512="5ac1aaf0b57436178360242cbf756b7e78b4866287a99d3e1d7653283c0e130747c32c97190b3570882ece239d48fb4194c6e00774f77f180fa88022dc428a37"
 
 export PACKAGES="$(ls packages)"
 export INIT_DIR="$PWD"
