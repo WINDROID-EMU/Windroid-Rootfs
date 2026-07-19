@@ -1,0 +1,381 @@
+From ba53b611b08b3e1019cf925abb4f48168562810f Mon Sep 17 00:00:00 2001
+From: pablo <pablolabs23@gmail.com>
+Date: Tue, 7 Jul 2026 11:04:54 -0300
+Subject: [PATCH] Add virtual controller support to Windows.Gaming.Input
+
+- Add UDP client support to read controller state from MiceWine virtual controller (port 7941)
+- Implement provider_create_virtual() to create virtual controller provider
+- Modify provider functions to handle virtual controller (Type, AxisCount, ButtonCount, SwitchCount, State, Vibration)
+- Add ws2_32 dependency for socket support
+- Enable Windows.Gaming.Input to detect Windroid-emu virtual controller for Unity games
+---
+ dlls/windows.gaming.input/Makefile.in |   2 +-
+ dlls/windows.gaming.input/main.c      |   3 +
+ dlls/windows.gaming.input/private.h   |   1 +
+ dlls/windows.gaming.input/provider.c  | 231 +++++++++++++++++++++++++-
+ 4 files changed, 227 insertions(+), 10 deletions(-)
+
+diff --git a/dlls/windows.gaming.input/Makefile.in b/dlls/windows.gaming.input/Makefile.in
+index 1342a4f9dde1..f931f56aa7b8 100644
+--- a/dlls/windows.gaming.input/Makefile.in
++++ b/dlls/windows.gaming.input/Makefile.in
+@@ -1,5 +1,5 @@
+ MODULE = windows.gaming.input.dll
+-IMPORTS = combase uuid user32 dinput8 setupapi hid
++IMPORTS = combase uuid user32 dinput8 setupapi hid ws2_32
+ 
+ SOURCES = \
+ 	async.c \
+diff --git a/dlls/windows.gaming.input/main.c b/dlls/windows.gaming.input/main.c
+index 39c0540aaced..edbb1eae8de9 100644
+--- a/dlls/windows.gaming.input/main.c
++++ b/dlls/windows.gaming.input/main.c
+@@ -95,6 +95,9 @@ static void initialize_providers( void )
+     }
+ 
+     SetupDiDestroyDeviceInfoList( set );
++
++    /* Create virtual provider for MiceWine virtual controller */
++    provider_create_virtual();
+ }
+ 
+ static DWORD WINAPI monitor_thread_proc( void *param )
+diff --git a/dlls/windows.gaming.input/private.h b/dlls/windows.gaming.input/private.h
+index f53d5b5bc37e..e17f95206136 100644
+--- a/dlls/windows.gaming.input/private.h
++++ b/dlls/windows.gaming.input/private.h
+@@ -65,6 +65,7 @@ extern HRESULT vector_create( const struct vector_iids *iids, void **out );
+ 
+ extern void provider_create( const WCHAR *device_path );
+ extern void provider_remove( const WCHAR *device_path );
++extern void provider_create_virtual( void );
+ 
+ extern void manager_on_provider_created( IGameControllerProvider *provider );
+ extern void manager_on_provider_removed( IGameControllerProvider *provider );
+diff --git a/dlls/windows.gaming.input/provider.c b/dlls/windows.gaming.input/provider.c
+index 6908d733a53b..931c8b1b65d1 100644
+--- a/dlls/windows.gaming.input/provider.c
++++ b/dlls/windows.gaming.input/provider.c
+@@ -24,9 +24,29 @@
+ #include "dinput.h"
+ #include "provider.h"
+ #include "hidusage.h"
++#include <winsock2.h>
++#include <ws2tcpip.h>
+ 
+ #include "wine/debug.h"
+ 
++#define SERVER_PORT 7941
++#define CONTROLLER_BUFFER_SIZE 11
++#define BUFFER_SIZE (CONTROLLER_BUFFER_SIZE * 4)
++
++#define REQUEST_GET_CONTROLLER_STATE 2
++
++#define A_BUTTON 0x01
++#define B_BUTTON 0x02
++#define X_BUTTON 0x04
++#define Y_BUTTON 0x08
++#define RB_BUTTON 0x10
++#define LB_BUTTON 0x20
++#define LS_BUTTON 0x40
++#define RS_BUTTON 0x80
++
++#define START_BUTTON 0x01
++#define SELECT_BUTTON 0x02
++
+ WINE_DEFAULT_DEBUG_CHANNEL(input);
+ 
+ DEFINE_GUID( device_path_guid, 0x00000000, 0x0000, 0x0000, 0x8d, 0x4a, 0x23, 0x90, 0x3f, 0xb6, 0xbd, 0xf8 );
+@@ -63,6 +83,9 @@ struct provider
+     BYTE haptics_report;
+     HIDP_CAPS caps;
+     HANDLE device;
++
++    BOOL is_virtual;
++    struct WineGameControllerState virtual_state;
+ };
+ 
+ static inline struct provider *impl_from_IWineGameControllerProvider( IWineGameControllerProvider *iface )
+@@ -113,10 +136,13 @@ static ULONG WINAPI wine_provider_Release( IWineGameControllerProvider *iface )
+ 
+     if (!ref)
+     {
+-        IDirectInputDevice8_Release( impl->dinput_device );
+-        HidD_FreePreparsedData( impl->preparsed );
+-        CloseHandle( impl->device );
+-        free( impl->report_buf );
++        if (!impl->is_virtual)
++        {
++            IDirectInputDevice8_Release( impl->dinput_device );
++            HidD_FreePreparsedData( impl->preparsed );
++            CloseHandle( impl->device );
++            free( impl->report_buf );
++        }
+         free( impl );
+     }
+ 
+@@ -151,11 +177,17 @@ static BOOL CALLBACK count_ffb_axes( const DIDEVICEOBJECTINSTANCEW *obj, void *a
+ static HRESULT WINAPI wine_provider_get_Type( IWineGameControllerProvider *iface, WineGameControllerType *value )
+ {
+     struct provider *impl = impl_from_IWineGameControllerProvider( iface );
+-    DIDEVICEINSTANCEW instance = {.dwSize = sizeof(DIDEVICEINSTANCEW)};
+     HRESULT hr;
++    DIDEVICEINSTANCEW instance = {.dwSize = sizeof(DIDEVICEINSTANCEW)};
+ 
+     TRACE( "iface %p, value %p.\n", iface, value );
+ 
++    if (impl->is_virtual)
++    {
++        *value = WineGameControllerType_Gamepad;
++        return S_OK;
++    }
++
+     if (FAILED(hr = IDirectInputDevice8_GetDeviceInfo( impl->dinput_device, &instance ))) return hr;
+ 
+     switch (GET_DIDEVICE_TYPE( instance.dwDevType ))
+@@ -178,11 +210,17 @@ static HRESULT WINAPI wine_provider_get_Type( IWineGameControllerProvider *iface
+ static HRESULT WINAPI wine_provider_get_AxisCount( IWineGameControllerProvider *iface, INT32 *value )
+ {
+     struct provider *impl = impl_from_IWineGameControllerProvider( iface );
+-    DIDEVCAPS caps = {.dwSize = sizeof(DIDEVCAPS)};
+     HRESULT hr;
++    DIDEVCAPS caps = {.dwSize = sizeof(DIDEVCAPS)};
+ 
+     TRACE( "iface %p, value %p.\n", iface, value );
+ 
++    if (impl->is_virtual)
++    {
++        *value = 6; /* LX, LY, RX, RY, LT, RT */
++        return S_OK;
++    }
++
+     if (SUCCEEDED(hr = IDirectInputDevice8_GetCapabilities( impl->dinput_device, &caps )))
+         *value = caps.dwAxes;
+     return hr;
+@@ -191,11 +229,17 @@ static HRESULT WINAPI wine_provider_get_AxisCount( IWineGameControllerProvider *
+ static HRESULT WINAPI wine_provider_get_ButtonCount( IWineGameControllerProvider *iface, INT32 *value )
+ {
+     struct provider *impl = impl_from_IWineGameControllerProvider( iface );
+-    DIDEVCAPS caps = {.dwSize = sizeof(DIDEVCAPS)};
+     HRESULT hr;
++    DIDEVCAPS caps = {.dwSize = sizeof(DIDEVCAPS)};
+ 
+     TRACE( "iface %p, value %p.\n", iface, value );
+ 
++    if (impl->is_virtual)
++    {
++        *value = 10; /* A, B, X, Y, LB, RB, LS, RS, Select, Start */
++        return S_OK;
++    }
++
+     if (SUCCEEDED(hr = IDirectInputDevice8_GetCapabilities( impl->dinput_device, &caps )))
+         *value = caps.dwButtons;
+     return hr;
+@@ -204,25 +248,146 @@ static HRESULT WINAPI wine_provider_get_ButtonCount( IWineGameControllerProvider
+ static HRESULT WINAPI wine_provider_get_SwitchCount( IWineGameControllerProvider *iface, INT32 *value )
+ {
+     struct provider *impl = impl_from_IWineGameControllerProvider( iface );
+-    DIDEVCAPS caps = {.dwSize = sizeof(DIDEVCAPS)};
+     HRESULT hr;
++    DIDEVCAPS caps = {.dwSize = sizeof(DIDEVCAPS)};
+ 
+     TRACE( "iface %p, value %p.\n", iface, value );
+ 
++    if (impl->is_virtual)
++    {
++        *value = 1; /* D-Pad */
++        return S_OK;
++    }
++
+     if (SUCCEEDED(hr = IDirectInputDevice8_GetCapabilities( impl->dinput_device, &caps )))
+         *value = caps.dwPOVs;
+     return hr;
+ }
+ 
++static short scale_value(unsigned short input)
++{
++    return -32768 + ((input * 65535) / 255);
++}
++
++static void read_virtual_controller_state(struct provider *impl)
++{
++    WSADATA wsaData;
++    SOCKET clientSocket;
++    struct sockaddr_in serverAddr;
++    struct timeval timeout;
++    const char *env = getenv("MICEWINE_JOYSTICK_SERVER_IP");
++    const char *serverIp = env ? env : "127.0.0.1";
++    char buffer[BUFFER_SIZE];
++    int serverAddrSize = sizeof(serverAddr);
++    int res = -1;
++
++    static BOOL wsa_initialized = FALSE;
++    if (!wsa_initialized)
++    {
++        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
++        {
++            ERR( "Failed to initialize Winsock\n" );
++            return;
++        }
++        wsa_initialized = TRUE;
++    }
++
++    clientSocket = socket(AF_INET, SOCK_DGRAM, 0);
++    if (clientSocket == INVALID_SOCKET)
++    {
++        ERR( "Error creating socket: %d\n", WSAGetLastError() );
++        return;
++    }
++
++    serverAddr.sin_family = AF_INET;
++    serverAddr.sin_addr.s_addr = inet_addr(serverIp);
++    serverAddr.sin_port = htons(SERVER_PORT);
++
++    timeout.tv_sec = 0;
++    timeout.tv_usec = 100000; // 100ms timeout
++
++    if (setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout)) < 0)
++    {
++        WARN( "Failed to set socket timeout\n" );
++    }
++
++    memset(buffer, 0, BUFFER_SIZE);
++    res = recvfrom(clientSocket, buffer, BUFFER_SIZE, 0, (struct sockaddr*)&serverAddr, &serverAddrSize);
++
++    if (res > 0 && buffer[0] == REQUEST_GET_CONTROLLER_STATE)
++    {
++        /*
++            Buffer Scheme:
++            buffer[0]: Type of operation
++            buffer[1]: Controller Connected Status
++            buffer[2]: A, B, X, Y, RB, LB, RS, LS Button State
++            buffer[3]: Start, Select Button State
++            buffer[4]: D-Pad Status
++            buffer[5]: Left X Analog Status (0-255)
++            buffer[6]: Left Y Analog Status (0-255)
++            buffer[7]: Right X Analog Status (0-255)
++            buffer[8]: Right Y Analog Status (0-255)
++            buffer[9]: LT Status (0-255)
++            buffer[10]: RT Status (0-255)
++        */
++
++        memset(&impl->virtual_state, 0, sizeof(impl->virtual_state));
++
++        impl->virtual_state.buttons[0] = (buffer[2] & A_BUTTON) != 0;
++        impl->virtual_state.buttons[1] = (buffer[2] & B_BUTTON) != 0;
++        impl->virtual_state.buttons[2] = (buffer[2] & X_BUTTON) != 0;
++        impl->virtual_state.buttons[3] = (buffer[2] & Y_BUTTON) != 0;
++        impl->virtual_state.buttons[4] = (buffer[2] & LB_BUTTON) != 0;
++        impl->virtual_state.buttons[5] = (buffer[2] & RB_BUTTON) != 0;
++        impl->virtual_state.buttons[6] = (buffer[2] & LS_BUTTON) != 0;
++        impl->virtual_state.buttons[7] = (buffer[2] & RS_BUTTON) != 0;
++        impl->virtual_state.buttons[8] = (buffer[3] & SELECT_BUTTON) != 0;
++        impl->virtual_state.buttons[9] = (buffer[3] & START_BUTTON) != 0;
++
++        /* D-Pad to switches */
++        switch (buffer[4])
++        {
++            case 0: impl->virtual_state.switches[0] = GameControllerSwitchPosition_Center; break;
++            case 1: impl->virtual_state.switches[0] = GameControllerSwitchPosition_Up; break;
++            case 2: impl->virtual_state.switches[0] = GameControllerSwitchPosition_UpRight; break;
++            case 3: impl->virtual_state.switches[0] = GameControllerSwitchPosition_Right; break;
++            case 4: impl->virtual_state.switches[0] = GameControllerSwitchPosition_DownRight; break;
++            case 5: impl->virtual_state.switches[0] = GameControllerSwitchPosition_Down; break;
++            case 6: impl->virtual_state.switches[0] = GameControllerSwitchPosition_DownLeft; break;
++            case 7: impl->virtual_state.switches[0] = GameControllerSwitchPosition_Left; break;
++            case 8: impl->virtual_state.switches[0] = GameControllerSwitchPosition_Left; break; /* LeftUp não existe, usar Left */
++        }
++
++        /* Analog axes */
++        impl->virtual_state.axes[0] = scale_value(buffer[5]) / 65535.;
++        impl->virtual_state.axes[1] = scale_value(buffer[6]) / 65535.;
++        impl->virtual_state.axes[2] = scale_value(buffer[7]) / 65535.;
++        impl->virtual_state.axes[3] = scale_value(buffer[8]) / 65535.;
++        impl->virtual_state.axes[4] = buffer[9] / 255.;
++        impl->virtual_state.axes[5] = buffer[10] / 255.;
++
++        impl->virtual_state.timestamp = GetTickCount64();
++    }
++
++    closesocket(clientSocket);
++}
++
+ static HRESULT WINAPI wine_provider_get_State( IWineGameControllerProvider *iface, struct WineGameControllerState *out )
+ {
+     struct provider *impl = impl_from_IWineGameControllerProvider( iface );
++    HRESULT hr;
+     DIJOYSTATE2 state = {0};
+     UINT32 i = 0;
+-    HRESULT hr;
+ 
+     TRACE( "iface %p, out %p.\n", iface, out );
+ 
++    if (impl->is_virtual)
++    {
++        read_virtual_controller_state(impl);
++        *out = impl->virtual_state;
++        return S_OK;
++    }
++
+     if (FAILED(hr = IDirectInputDevice8_GetDeviceState( impl->dinput_device, sizeof(state), &state )))
+     {
+         WARN( "Failed to read device state, hr %#lx\n", hr );
+@@ -297,6 +462,12 @@ static HRESULT WINAPI wine_provider_put_Vibration( IWineGameControllerProvider *
+ 
+     TRACE( "iface %p, value %p.\n", iface, &value );
+ 
++    if (impl->is_virtual)
++    {
++        impl->vibration = value;
++        return S_OK;
++    }
++
+     if (!memcmp( &impl->vibration, &value, sizeof(value) )) return S_OK;
+     impl->vibration = value;
+ 
+@@ -618,3 +789,45 @@ void provider_remove( const WCHAR *device_path )
+         IGameControllerProvider_Release( provider );
+     }
+ }
++
++void provider_create_virtual( void )
++{
++    static const WCHAR virtual_device_path[] = L"MICEWINE_VIRTUAL_CONTROLLER";
++    IGameControllerProvider *provider;
++    struct provider *impl, *entry;
++    BOOL found = FALSE;
++
++    TRACE( "Creating virtual MiceWine controller provider\n" );
++
++    EnterCriticalSection( &provider_cs );
++    LIST_FOR_EACH_ENTRY( entry, &provider_list, struct provider, entry )
++        if ((found = !wcsicmp( entry->device_path, virtual_device_path ))) break;
++    LeaveCriticalSection( &provider_cs );
++
++    if (found)
++    {
++        TRACE( "Virtual provider already exists\n" );
++        return;
++    }
++
++    if (!(impl = calloc( 1, sizeof(*impl) )))
++    {
++        ERR( "Failed to allocate virtual provider\n" );
++        return;
++    }
++
++    impl->IWineGameControllerProvider_iface.lpVtbl = &wine_provider_vtbl;
++    impl->IGameControllerProvider_iface.lpVtbl = &game_provider_vtbl;
++    impl->dinput_device = NULL;
++    impl->device = NULL;
++    impl->preparsed = NULL;
++    impl->report_buf = NULL;
++    wcscpy( impl->device_path, virtual_device_path );
++    impl->ref = 1;
++    impl->is_virtual = TRUE;
++
++    provider = &impl->IGameControllerProvider_iface;
++    list_add_tail( &provider_list, &impl->entry );
++    manager_on_provider_created( provider );
++    TRACE( "Virtual provider created successfully\n" );
++}

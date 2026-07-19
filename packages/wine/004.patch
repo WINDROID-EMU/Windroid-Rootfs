@@ -1,0 +1,271 @@
+diff --git a/dlls/ntdll/unix/esync.c b/dlls/ntdll/unix/esync.c
+index e0c85529b0c..0c34442e7c8 100644
+--- a/dlls/ntdll/unix/esync.c
++++ b/dlls/ntdll/unix/esync.c
+@@ -41,6 +41,7 @@
+ #include <poll.h>
+ #include <sys/types.h>
+ #include <unistd.h>
++#include <sched.h>
+ 
+ #include "ntstatus.h"
+ #define WIN32_NO_STATUS
+@@ -190,6 +191,11 @@ static void *get_shm( unsigned int idx )
+     int offset = (idx * 8) % pagesize;
+     void *ret;
+ 
++    /* Fast path: check if entry is already allocated without mutex */
++    if (entry < shm_addrs_size && shm_addrs[entry])
++        return (void *)((unsigned long)shm_addrs[entry] + offset);
++
++    /* Slow path: need to allocate, use mutex for safety */
+     pthread_mutex_lock( &shm_addrs_mutex );
+ 
+     if (entry >= shm_addrs_size)
+@@ -544,6 +550,19 @@ static inline void small_pause(void)
+ #endif
+ }
+ 
++/* Improved backoff for spinlock - exponential backoff to reduce contention */
++static inline void backoff(int attempts)
++{
++    if (attempts < 10)
++        small_pause();
++    else if (attempts < 20)
++        for (int i = 0; i < 10; i++) small_pause();
++    else if (attempts < 30)
++        sched_yield();
++    else
++        usleep(1);
++}
++
+ /* Manual-reset events are actually racier than other objects in terms of shm
+  * state. With other objects, races don't matter, because we only treat the shm
+  * state as a hint that lets us skip poll()—we still have to read(). But with
+@@ -599,6 +618,7 @@ NTSTATUS esync_set_event( HANDLE handle )
+     struct esync *obj;
+     struct event *event;
+     NTSTATUS ret;
++    int attempts = 0;
+ 
+     TRACE("%p.\n", handle);
+ 
+@@ -607,9 +627,11 @@ NTSTATUS esync_set_event( HANDLE handle )
+ 
+     if (obj->type == ESYNC_MANUAL_EVENT)
+     {
+-        /* Acquire the spinlock. */
++        /* Acquire the spinlock with exponential backoff. */
+         while (InterlockedCompareExchange( &event->locked, 1, 0 ))
+-            small_pause();
++        {
++            backoff( attempts++ );
++        }
+     }
+ 
+     /* For manual-reset events, as long as we're in a lock, we can take the
+@@ -642,6 +664,7 @@ NTSTATUS esync_reset_event( HANDLE handle )
+     struct esync *obj;
+     struct event *event;
+     NTSTATUS ret;
++    int attempts = 0;
+ 
+     TRACE("%p.\n", handle);
+ 
+@@ -650,9 +673,11 @@ NTSTATUS esync_reset_event( HANDLE handle )
+ 
+     if (obj->type == ESYNC_MANUAL_EVENT)
+     {
+-        /* Acquire the spinlock. */
++        /* Acquire the spinlock with exponential backoff. */
+         while (InterlockedCompareExchange( &event->locked, 1, 0 ))
+-            small_pause();
++        {
++            backoff( attempts++ );
++        }
+     }
+ 
+     /* For manual-reset events, as long as we're in a lock, we can take the
+@@ -1148,17 +1173,97 @@ static NTSTATUS __esync_wait_objects( unsigned int count, const HANDLE *handles,
+          * were blocking on object B, then B becomes available and someone grabs
+          * A before we can, then they might have grabbed A before B became
+          * signaled. In either case anyone who tries to wait on A or B will be
+-         * waiting for an instant while we put things back. */
++         * waiting for an instant while we put things back.
++         *
++         * OPTIMIZATION: Instead of polling sequentially, poll all objects at once
++         * to reduce system calls. Only fall back to sequential polling if needed. */
+ 
+         while (1)
+         {
+ tryagain:
+-            /* First step: try to poll on each object in sequence. */
++            /* Optimized approach: poll all objects at once first */
++            for (i = 0; i < count; i++)
++            {
++                fds[i].fd = objs[i] ? objs[i]->fd : -1;
++                fds[i].events = POLLIN;
++            }
++            pollcount = i;
++            if (alertable)
++            {
++                fds[pollcount].fd = ntdll_get_thread_data()->esync_apc_fd;
++                fds[pollcount].events = POLLIN;
++                pollcount++;
++            }
++
++            /* Check if all objects are already signaled */
++            ret = poll( fds, pollcount, 0 );
++            if (ret == pollcount || (ret == pollcount - 1 && alertable && !(fds[pollcount-1].revents & POLLIN)))
++            {
++                /* All objects are signaled, try to grab them */
++                BOOL abandoned = FALSE;
++                BOOL all_grabbed = TRUE;
++
++                for (i = 0; i < count; i++)
++                {
++                    struct esync *obj = objs[i];
++
++                    if (!obj) continue;
++
++                    switch (obj->type)
++                    {
++                    case ESYNC_MUTEX:
++                    {
++                        struct mutex *mutex = obj->shm;
++                        if (mutex->tid == GetCurrentThreadId())
++                            break;
++                        /* otherwise fall through */
++                    }
++                    case ESYNC_SEMAPHORE:
++                    case ESYNC_AUTO_EVENT:
++                        if ((size = read( fds[i].fd, &value, sizeof(value) )) != sizeof(value))
++                        {
++                            /* We were too slow. Put everything back. */
++                            value = 1;
++                            for (j = i - 1; j >= 0; j--)
++                            {
++                                if (objs[j] && (objs[j]->type == ESYNC_MUTEX ||
++                                               objs[j]->type == ESYNC_SEMAPHORE ||
++                                               objs[j]->type == ESYNC_AUTO_EVENT))
++                                {
++                                    if (write( objs[j]->fd, &value, sizeof(value) ) == -1)
++                                        return errno_to_status( errno );
++                                }
++                            }
++                            all_grabbed = FALSE;
++                            goto tryagain;
++                        }
++                        break;
++                    default:
++                        /* Manual events don't need to be grabbed */
++                        break;
++                    }
++                }
++
++                if (all_grabbed)
++                {
++                    for (i = 0; i < count; i++)
++                        abandoned |= update_grabbed_object( objs[i] );
++
++                    if (abandoned)
++                    {
++                        TRACE("Wait successful, but some object(s) were abandoned.\n");
++                        return STATUS_ABANDONED;
++                    }
++                    TRACE("Wait successful.\n");
++                    return STATUS_SUCCESS;
++                }
++            }
++
++            /* Fall back to sequential polling for objects that aren't signaled yet */
+             fds[0].events = POLLIN;
+             pollcount = 1;
+             if (alertable)
+             {
+-                /* We also need to wait on APCs. */
+                 fds[1].fd = ntdll_get_thread_data()->esync_apc_fd;
+                 fds[1].events = POLLIN;
+                 pollcount++;
+@@ -1198,7 +1303,6 @@ tryagain:
+                 fds[i].fd = objs[i] ? objs[i]->fd : -1;
+                 fds[i].events = POLLIN;
+             }
+-            /* There's no reason to check for APCs here. */
+             pollcount = i;
+ 
+             /* Poll everything to see if they're still signaled. */
+diff --git a/server/esync.c b/server/esync.c
+index df3bbe66b30..6f82a2a075b 100644
+--- a/server/esync.c
++++ b/server/esync.c
+@@ -32,6 +32,7 @@
+ # include <sys/stat.h>
+ #endif
+ #include <unistd.h>
++#include <sched.h>
+ 
+ #include "ntstatus.h"
+ #define WIN32_NO_STATUS
+@@ -468,11 +469,25 @@ static inline void small_pause(void)
+ #endif
+ }
+ 
++/* Improved backoff for spinlock - exponential backoff to reduce contention */
++static inline void backoff(int attempts)
++{
++    if (attempts < 10)
++        small_pause();
++    else if (attempts < 20)
++        for (int i = 0; i < 10; i++) small_pause();
++    else if (attempts < 30)
++        sched_yield();
++    else
++        usleep(1);
++}
++
+ /* Server-side event support. */
+ void esync_set_event( struct esync *esync )
+ {
+     static const uint64_t value = 1;
+     struct event *event = get_shm( esync->shm_idx );
++    int attempts = 0;
+ 
+     assert( esync->obj.ops == &esync_ops );
+     assert( event != NULL );
+@@ -482,9 +497,11 @@ void esync_set_event( struct esync *esync )
+ 
+     if (esync->type == ESYNC_MANUAL_EVENT)
+     {
+-        /* Acquire the spinlock. */
++        /* Acquire the spinlock with exponential backoff. */
+         while (__sync_val_compare_and_swap( &event->locked, 0, 1 ))
+-            small_pause();
++        {
++            backoff( attempts++ );
++        }
+     }
+ 
+     if (!__atomic_exchange_n( &event->signaled, 1, __ATOMIC_SEQ_CST ))
+@@ -504,6 +521,7 @@ void esync_reset_event( struct esync *esync )
+ {
+     static uint64_t value = 1;
+     struct event *event = get_shm( esync->shm_idx );
++    int attempts = 0;
+ 
+     assert( esync->obj.ops == &esync_ops );
+     assert( event != NULL );
+@@ -513,9 +531,11 @@ void esync_reset_event( struct esync *esync )
+ 
+     if (esync->type == ESYNC_MANUAL_EVENT)
+     {
+-        /* Acquire the spinlock. */
++        /* Acquire the spinlock with exponential backoff. */
+         while (__sync_val_compare_and_swap( &event->locked, 0, 1 ))
+-            small_pause();
++        {
++            backoff( attempts++ );
++        }
+     }
+ 
+     /* Only bother signaling the fd if we weren't already signaled. */
