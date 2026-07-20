@@ -3,5 +3,5 @@ SRC_URL=https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-$PKG_VER.tar.x
 MESON_ARGS="-Dintrospection=disabled -Dcheck=disabled -Dtests=disabled -Dexamples=disabled "
 MESON_ARGS+="-Dbenchmarks=disabled -Dlibunwind=disabled -Dlibdw=disabled -Dnls=disabled"
 CFLAGS="-I$PREFIX/include"
-LDFLAGS="-L$PREFIX/lib"
+LDFLAGS="-L$PREFIX/lib -Wl,-rpath=$PREFIX/lib"
 DEPENDENCIES="glib"
