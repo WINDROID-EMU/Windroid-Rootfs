@@ -1,5 +1,5 @@
---- glib/gtypes.h.bak	2026-07-22 02:23:46.042196718 +0000
-+++ glib/gtypes.h	2026-07-22 02:23:51.642214108 +0000
+--- a/glib/gtypes.h
++++ b/glib/gtypes.h
 @@ -452,7 +452,9 @@
  #define _GLIB_HAVE_STD_OVERFLOW_CHECKS
  /* https://bugzilla.gnome.org/show_bug.cgi?id=769104 */

@@ -1,5 +1,5 @@
---- meson.build.bak	2026-07-22 02:23:46.042196718 +0000
-+++ meson.build	2026-07-22 02:23:57.030230825 +0000
+--- a/meson.build
++++ b/meson.build
 @@ -598,7 +598,6 @@
      '-Wno-format-zero-length',
      # We explicitly require variadic macros
