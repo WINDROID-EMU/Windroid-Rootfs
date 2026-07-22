@@ -1,6 +1,6 @@
---- glib-2.82.4/meson.build	2024-12-11 19:21:22.000000000 -0300
-+++ glib-2.82.4-fix/meson.build	2025-04-16 22:20:15.974787910 -0300
-@@ -569,7 +569,6 @@
+--- meson.build.bak	2026-07-22 02:23:46.042196718 +0000
++++ meson.build	2026-07-22 02:23:57.030230825 +0000
+@@ -598,7 +598,6 @@
      '-Wno-format-zero-length',
      # We explicitly require variadic macros
      '-Wno-variadic-macros',
@@ -8,7 +8,7 @@
      '-Werror=init-self',
      '-Werror=missing-include-dirs',
      '-Werror=pointer-arith',
-@@ -695,7 +694,6 @@
+@@ -736,7 +735,6 @@
    'getresuid',
    'getvfsstat',
    'gmtime_r',
@@ -16,43 +16,56 @@
    'inotify_init1',
    'issetugid',
    'kevent',
-@@ -1002,7 +1000,7 @@
+@@ -1049,18 +1047,18 @@
+                #include <sys/syscall.h>
+                #include <unistd.h>
                 int main (int argc, char ** argv) {
-                  syscall (__NR_futex, NULL, FUTEX_WAKE, FUTEX_WAIT);
-                  return 0;
+-                 syscall (__NR_futex, NULL, FUTEX_WAKE, FUTEX_WAIT);
+-                 return 0;
 -               }''', name : 'futex(2) system call')
-+               }''', name : 'futex(2) system call') and host_system != 'android'
++                  syscall (__NR_futex, NULL, FUTEX_WAKE, FUTEX_WAIT);
++                  return 0;
++                }''', name : 'futex(2) system call') and host_system != 'android'
    glib_conf.set('HAVE_FUTEX', 1)
  endif
  if cc.compiles('''#include <linux/futex.h>
-@@ -1011,7 +1009,7 @@
+                #include <sys/syscall.h>
+                #include <unistd.h>
                 int main (int argc, char ** argv) {
-                  syscall (__NR_futex_time64, NULL, FUTEX_WAKE, FUTEX_WAIT);
-                  return 0;
+-                 syscall (__NR_futex_time64, NULL, FUTEX_WAKE, FUTEX_WAIT);
+-                 return 0;
 -               }''', name : 'futex_time64(2) system call')
-+               }''', name : 'futex_time64(2) system call') and host_system != 'android'
++                  syscall (__NR_futex_time64, NULL, FUTEX_WAKE, FUTEX_WAIT);
++                  return 0;
++                }''', name : 'futex_time64(2) system call') and host_system != 'android'
    glib_conf.set('HAVE_FUTEX_TIME64', 1)
  endif
  
-@@ -1048,7 +1046,7 @@
-                  syscall (SYS_pidfd_open, 0, 0);
-                  waitid (P_PIDFD, 0, &child_info, WEXITED | WNOHANG);
-                  return 0;
+@@ -1094,10 +1092,10 @@
+                #include <unistd.h>
+                int main (int argc, char ** argv) {
+                  siginfo_t child_info = { 0, };
+-                 syscall (SYS_pidfd_open, 0, 0);
+-                 waitid (P_PIDFD, 0, &child_info, WEXITED | WNOHANG);
+-                 return 0;
 -               }''', name : 'pidfd_open(2) system call')
-+               }''', name : 'pidfd_open(2) system call') and host_system != 'android'
++                  syscall (SYS_pidfd_open, 0, 0);
++                  waitid (P_PIDFD, 0, &child_info, WEXITED | WNOHANG);
++                  return 0;
++                }''', name : 'pidfd_open(2) system call') and host_system != 'android'
    glib_conf.set('HAVE_PIDFD', 1)
  endif
  
-@@ -2602,11 +2600,7 @@
- 
- # introspection
- gir_scanner = find_program('g-ir-scanner', required: get_option('introspection'))
--enable_gir = get_option('introspection').allowed() and gir_scanner.found() and meson.can_run_host_binaries()
+@@ -2709,11 +2707,7 @@
+ gobject_introspection_required_version = '>= 1.80.0'
+ gir_scanner = find_program('g-ir-scanner', required: get_option('introspection'), version: gobject_introspection_required_version)
+ gobject_introspection = dependency('gobject-introspection-1.0', required: get_option('introspection'), version: gobject_introspection_required_version)
+-enable_gir = get_option('introspection').allowed() and gir_scanner.found() and gobject_introspection.found() and meson.can_run_host_binaries()
 -
 -if get_option('introspection').enabled() and not meson.can_run_host_binaries()
 -  error('Running binaries on the build host needs to be supported to build with -Dintrospection=enabled')
 -endif
-+enable_gir = get_option('introspection').allowed() and gir_scanner.found()
++enable_gir = get_option('introspection').allowed() and gir_scanner.found() and gobject_introspection.found()
  
  gir_args = [
    '--quiet',

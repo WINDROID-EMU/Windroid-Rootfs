@@ -1,13 +1,12 @@
---- a/glib/gtypes.h
-+++ b/glib/gtypes.h
-@@ -429,6 +429,10 @@
- #endif
- #endif
- 
-+#if defined __clang__ && defined __arm__
-+#undef _GLIB_HAVE_BUILTIN_OVERFLOW_CHECKS
+--- glib/gtypes.h.bak	2026-07-22 02:23:46.042196718 +0000
++++ glib/gtypes.h	2026-07-22 02:23:51.642214108 +0000
+@@ -452,7 +452,9 @@
+ #define _GLIB_HAVE_STD_OVERFLOW_CHECKS
+ /* https://bugzilla.gnome.org/show_bug.cgi?id=769104 */
+ #elif __GNUC__ >= 5 && !defined(__INTEL_COMPILER)
++#if !(defined __clang__ && defined __arm__)
+ #define _GLIB_HAVE_BUILTIN_OVERFLOW_CHECKS
 +#endif
-+
- #ifdef _GLIB_HAVE_BUILTIN_OVERFLOW_CHECKS
- 
- #define g_uint_checked_add(dest, a, b) \
+ #elif g_macro__has_builtin(__builtin_add_overflow)
+ #define _GLIB_HAVE_BUILTIN_OVERFLOW_CHECKS
+ #elif defined(G_OS_WIN32) && defined(HAVE_INTSAFE_H)
