@@ -1,4 +1,4 @@
-PKG_VER=2.4.124
+PKG_VER=2.4.134
 SRC_URL=https://dri.freedesktop.org/libdrm/libdrm-$PKG_VER.tar.xz
 
 getDrmDrivers()
