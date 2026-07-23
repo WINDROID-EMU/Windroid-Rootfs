@@ -1,0 +1,409 @@
+diff --git a/dlls/ntdll/unix/esync.c b/dlls/ntdll/unix/esync.c
+index e0c8552..a67be3e 100644
+--- a/dlls/ntdll/unix/esync.c
++++ b/dlls/ntdll/unix/esync.c
+@@ -31,6 +31,7 @@
+ #include <assert.h>
+ #include <errno.h>
+ #include <fcntl.h>
++#include <limits.h>
+ #include <stdarg.h>
+ #include <stdint.h>
+ #include <stdlib.h>
+@@ -41,6 +42,10 @@
+ #include <poll.h>
+ #include <sys/types.h>
+ #include <unistd.h>
++#ifdef __linux__
++# include <linux/futex.h>
++# include <sys/syscall.h>
++#endif
+ 
+ #include "ntstatus.h"
+ #define WIN32_NO_STATUS
+@@ -89,8 +94,14 @@ struct mutex
+ {
+     LONG tid;
+     LONG count;    /* recursion count */
++    /* See the matching comment in server/esync.c: number of threads
++     * currently blocked trying to acquire this mutex, via either the futex
++     * fast path (esync_wait_mutex_fast()) or the poll()/eventfd path
++     * (do_poll_mutex_aware()). esync_release_mutex() checks this before
++     * doing any wake at all. */
++    LONG waiters;
+ };
+-C_ASSERT(sizeof(struct mutex) == 8);
++C_ASSERT(sizeof(struct mutex) == 12);
+ 
+ struct event
+ {
+@@ -184,10 +195,14 @@ static int shm_open(const char *name, int oflag, mode_t mode) {
+ }
+ #endif
+ 
++/* Must match the server-side definition of the same name in
++ * server/esync.c exactly -- see the comment there. */
++#define ESYNC_SHM_SLOT_SIZE 64
++
+ static void *get_shm( unsigned int idx )
+ {
+-    int entry  = (idx * 8) / pagesize;
+-    int offset = (idx * 8) % pagesize;
++    int entry  = (idx * ESYNC_SHM_SLOT_SIZE) / pagesize;
++    int offset = (idx * ESYNC_SHM_SLOT_SIZE) % pagesize;
+     void *ret;
+ 
+     pthread_mutex_lock( &shm_addrs_mutex );
+@@ -740,6 +755,24 @@ NTSTATUS esync_open_mutex( HANDLE *handle, ACCESS_MASK access,
+     return open_esync( ESYNC_MUTEX, handle, access, attr );
+ }
+ 
++#ifdef __linux__
++/* Raw futex(2) wrappers. Deliberately NOT the _PRIVATE variants: the futex
++ * word lives in a POSIX shared memory mapping (MAP_SHARED) that is shared
++ * between the wineserver and every client process, i.e. it is not private
++ * to a single process's address space, which _PRIVATE requires. Using
++ * _PRIVATE here would be silently wrong -- waiters in one process would not
++ * reliably be woken by a release happening in another. */
++static inline int futex_wait( LONG *addr, int val, const struct timespec *timeout )
++{
++    return syscall( SYS_futex, addr, FUTEX_WAIT, val, timeout, NULL, 0 );
++}
++
++static inline int futex_wake( LONG *addr, int count )
++{
++    return syscall( SYS_futex, addr, FUTEX_WAKE, count, NULL, NULL, 0 );
++}
++#endif
++
+ NTSTATUS esync_release_mutex( HANDLE *handle, LONG *prev )
+ {
+     struct esync *obj;
+@@ -767,6 +800,28 @@ NTSTATUS esync_release_mutex( HANDLE *handle, LONG *prev )
+          * theirs. */
+         mutex->tid = 0;
+ 
++#ifdef __linux__
++        /* The overwhelmingly common case: nobody is blocked on this mutex at
++         * all (neither via futex_wait() below, nor via poll() on the
++         * eventfd), so there is nobody to wake up. Skip both wake mechanisms
++         * entirely, saving what would otherwise be a mandatory syscall on
++         * every single uncontended mutex release. This is safe precisely
++         * because every place that can block on this mutex -- the futex
++         * fast path and the poll()/eventfd path alike -- increments
++         * `waiters` strictly before it can go to sleep, and only decrements
++         * it after waking back up (see esync_wait_mutex_fast() and
++         * do_poll_mutex_aware()). So if we observe 0 here, nobody was
++         * asleep at any point during this release; if instead someone was
++         * genuinely about to go to sleep concurrently, they are guaranteed
++         * to observe `waiters` already incremented by the time they check
++         * `tid`, so they will not block for longer than one retry loop
++         * iteration -- no wakeup can be lost. */
++        if (!InterlockedCompareExchange( &mutex->waiters, 0, 0 ))
++            return STATUS_SUCCESS;
++
++        futex_wake( &mutex->tid, INT_MAX );
++#endif
++
+         if (write( obj->fd, &value, sizeof(value) ) == -1)
+             return errno_to_status( errno );
+     }
+@@ -838,6 +893,36 @@ static int do_poll( struct pollfd *fds, nfds_t nfds, ULONGLONG *end )
+     return ret;
+ }
+ 
++/* Wrapper around do_poll() that marks any mutex objects among the polled
++ * set as having a waiter for the duration of the call, so that
++ * esync_release_mutex() knows it must not skip waking this thread (see the
++ * comment there). `objs`/`objs_count` describe which sync objects are
++ * actually being polled on right now via `fds` -- for the wait-any path
++ * that's the whole set; for the wait-all path, which polls one object at a
++ * time, it's just that one object. Unconditional (not under #ifdef
++ * __linux__): it only touches the `waiters` counter, it doesn't need
++ * futex(2) itself, so it's harmless -- if the counter is never checked by
++ * anything on a hypothetical non-Linux build, this is just a couple of
++ * extra InterlockedIncrement/Decrement calls. */
++static int do_poll_mutex_aware( struct esync *const *objs, unsigned int objs_count,
++                                 struct pollfd *fds, nfds_t nfds, ULONGLONG *end )
++{
++    unsigned int i;
++    int ret;
++
++    for (i = 0; i < objs_count; i++)
++        if (objs[i] && objs[i]->type == ESYNC_MUTEX)
++            InterlockedIncrement( &((struct mutex *)objs[i]->shm)->waiters );
++
++    ret = do_poll( fds, nfds, end );
++
++    for (i = 0; i < objs_count; i++)
++        if (objs[i] && objs[i]->type == ESYNC_MUTEX)
++            InterlockedDecrement( &((struct mutex *)objs[i]->shm)->waiters );
++
++    return ret;
++}
++
+ /* Return TRUE if abandoned. */
+ static BOOL update_grabbed_object( struct esync *obj )
+ {
+@@ -875,6 +960,99 @@ static BOOL update_grabbed_object( struct esync *obj )
+     return ret;
+ }
+ 
++#ifdef __linux__
++/* Fast path for the single most common wait shape in real applications:
++ * waiting on exactly one mutex (RtlEnterCriticalSection falling into its
++ * blocking path, or a plain WaitForSingleObject(hMutex, ...)). Uses a futex
++ * directly on `tid` instead of going through poll()/eventfd, so acquiring
++ * and releasing an *uncontended* mutex now costs zero syscalls each,
++ * instead of one apiece (a read() on grab, a write() on release).
++ *
++ * Deliberately scoped to non-alertable single-handle waits only: supporting
++ * alertable waits here would mean also multiplexing the APC fd, which needs
++ * poll() anyway and defeats the point. Those still fall through to the
++ * regular poll()-based path below, which is unaffected by any of this. */
++static NTSTATUS esync_wait_mutex_fast( struct esync *obj, HANDLE handle, const LARGE_INTEGER *timeout )
++{
++    struct mutex *mutex = obj->shm;
++    DWORD tid = GetCurrentThreadId();
++    ULONGLONG end = 0;
++
++    if (mutex->tid == tid)
++    {
++        TRACE("Woken up by handle %p [0] (recursive).\n", handle);
++        mutex->count++;
++        return STATUS_SUCCESS;
++    }
++
++    if (timeout)
++    {
++        LARGE_INTEGER now;
++        NtQuerySystemTime( &now );
++        end = (timeout->QuadPart >= 0) ? timeout->QuadPart : now.QuadPart - timeout->QuadPart;
++    }
++
++    InterlockedIncrement( &mutex->waiters );
++
++    for (;;)
++    {
++        LONG owner = InterlockedCompareExchange( &mutex->tid, tid, 0 );
++
++        if (!owner)
++        {
++            InterlockedDecrement( &mutex->waiters );
++            mutex->count = 1;
++            TRACE("Woken up by handle %p [0].\n", handle);
++            return STATUS_SUCCESS;
++        }
++
++        if (owner == ~0)
++        {
++            /* Abandoned. Still try to grab it -- CAS from the abandoned
++             * sentinel specifically, so we don't clobber a legitimate new
++             * owner if we lost a race for it. */
++            if (InterlockedCompareExchange( &mutex->tid, tid, ~0 ) == ~0)
++            {
++                InterlockedDecrement( &mutex->waiters );
++                mutex->count = 1;
++                TRACE("Woken up by abandoned mutex %p [0].\n", handle);
++                return STATUS_ABANDONED_WAIT_0;
++            }
++            continue;
++        }
++
++        if (timeout)
++        {
++            struct timespec tmo;
++            LONGLONG timeleft = update_timeout( end );
++
++            if (!timeleft)
++            {
++                InterlockedDecrement( &mutex->waiters );
++                TRACE("Wait timed out.\n");
++                return STATUS_TIMEOUT;
++            }
++            tmo.tv_sec  = timeleft / (ULONGLONG)TICKSPERSEC;
++            tmo.tv_nsec = (timeleft % TICKSPERSEC) * 100;
++
++            if (futex_wait( &mutex->tid, owner, &tmo ) == -1 && errno == ETIMEDOUT)
++            {
++                InterlockedDecrement( &mutex->waiters );
++                TRACE("Wait timed out.\n");
++                return STATUS_TIMEOUT;
++            }
++        }
++        else
++        {
++            futex_wait( &mutex->tid, owner, NULL );
++        }
++
++        /* EAGAIN (value already changed under us), EINTR, or a genuine
++         * wakeup: loop around and re-check from scratch either way. */
++    }
++}
++#endif
++
+ /* A value of STATUS_NOT_IMPLEMENTED returned from this function means that we
+  * need to delegate to server_select(). */
+ static NTSTATUS __esync_wait_objects( unsigned int count, const HANDLE *handles, BOOLEAN wait_any,
+@@ -938,6 +1116,11 @@ static NTSTATUS __esync_wait_objects( unsigned int count, const HANDLE *handles,
+             return ret;
+     }
+ 
++#ifdef __linux__
++    if (count == 1 && !alertable && objs[0] && objs[0]->type == ESYNC_MUTEX)
++        return esync_wait_mutex_fast( objs[0], handles[0], timeout );
++#endif
++
+     if (objs[count - 1] && objs[count - 1]->type == ESYNC_QUEUE)
+         msgwait = TRUE;
+ 
+@@ -1070,7 +1253,7 @@ static NTSTATUS __esync_wait_objects( unsigned int count, const HANDLE *handles,
+ 
+         while (1)
+         {
+-            ret = do_poll( fds, pollcount, timeout ? &end : NULL );
++            ret = do_poll_mutex_aware( objs, count, fds, pollcount, timeout ? &end : NULL );
+             if (ret > 0)
+             {
+                 /* We must check this first! The server may set an event that
+@@ -1178,7 +1361,11 @@ tryagain:
+                         continue;
+                 }
+ 
+-                ret = do_poll( fds, pollcount, timeout ? &end : NULL );
++                /* Only `obj` itself is actually being polled on right now
++                 * (fds[0]; fds[1], if present, is just the APC fd, which
++                 * isn't a sync object) -- so only it needs to be marked as
++                 * having a waiter for the duration of this call. */
++                ret = do_poll_mutex_aware( &obj, 1, fds, pollcount, timeout ? &end : NULL );
+                 if (ret <= 0)
+                     goto err;
+                 else if (alertable && (fds[1].revents & POLLIN))
+diff --git a/server/esync.c b/server/esync.c
+index df3bbe6..e9407a5 100644
+--- a/server/esync.c
++++ b/server/esync.c
+@@ -21,7 +21,9 @@
+ #include "config.h"
+ 
+ 
++#include <errno.h>
+ #include <fcntl.h>
++#include <limits.h>
+ #include <stdio.h>
+ #include <stdarg.h>
+ #ifdef HAVE_SYS_EVENTFD_H
+@@ -32,6 +34,10 @@
+ # include <sys/stat.h>
+ #endif
+ #include <unistd.h>
++#ifdef __linux__
++# include <linux/futex.h>
++# include <sys/syscall.h>
++#endif
+ 
+ #include "ntstatus.h"
+ #define WIN32_NO_STATUS
+@@ -260,10 +266,27 @@ static int type_matches( enum esync_type type1, enum esync_type type2 )
+             (type2 == ESYNC_AUTO_EVENT || type2 == ESYNC_MANUAL_EVENT));
+ }
+ 
++/* Each sync object gets a slot this many bytes apart in the shm section,
++ * instead of being packed tightly (8 bytes each). This must match the
++ * client-side definition of the same name in dlls/ntdll/unix/esync.c
++ * exactly, since both sides compute byte offsets from the same shm_idx
++ * independently.
++ *
++ * One cache line (64 bytes on essentially every relevant CPU, including all
++ * current ARM cores) avoids false sharing: with the old 8-byte packing, up
++ * to 8 unrelated sync objects could land on the same cache line, so two
++ * threads hammering *different*, unrelated mutexes/events/semaphores would
++ * still bounce the same cache line between cores. It also leaves room for
++ * the mutex's new "waiters" field (see struct mutex below) without shrinking
++ * that margin further. The extra memory cost is one page per ~64 objects
++ * instead of one page per ~512, which is negligible for the handle counts
++ * real applications use. */
++#define ESYNC_SHM_SLOT_SIZE 64
++
+ static void *get_shm( unsigned int idx )
+ {
+-    int entry  = (idx * 8) / pagesize;
+-    int offset = (idx * 8) % pagesize;
++    int entry  = (idx * ESYNC_SHM_SLOT_SIZE) / pagesize;
++    int offset = (idx * ESYNC_SHM_SLOT_SIZE) % pagesize;
+ 
+     if (entry >= shm_addrs_size)
+     {
+@@ -307,8 +330,17 @@ struct mutex
+ {
+     DWORD tid;
+     int count;    /* recursion count */
++    /* Number of threads currently blocked trying to acquire this mutex,
++     * whether via a client-side futex_wait() on `tid` (the new single-object
++     * fast path) or via poll() on the eventfd (the existing multi-object
++     * path, e.g. WaitForMultipleObjects). The client checks this before
++     * deciding whether a release needs to wake anyone at all; see
++     * esync_release_mutex() client-side. Kept at 0 whenever the mutex is
++     * uncontended, which is the overwhelmingly common case, so that release
++     * can skip both wake mechanisms (and their syscalls) entirely. */
++    int waiters;
+ };
+-C_ASSERT(sizeof(struct mutex) == 8);
++C_ASSERT(sizeof(struct mutex) == 12);
+ 
+ struct event
+ {
+@@ -347,7 +379,7 @@ struct esync *create_esync( struct object *root, const struct unicode_str *name,
+             /* Use the fd as index, since that'll be unique across all
+              * processes, but should hopefully end up also allowing reuse. */
+             esync->shm_idx = esync->fd + 1; /* we keep index 0 reserved */
+-            while (esync->shm_idx * 8 >= shm_size)
++            while (esync->shm_idx * ESYNC_SHM_SLOT_SIZE >= shm_size)
+             {
+                 /* Better expand the shm section. */
+                 shm_size += pagesize;
+@@ -385,6 +417,12 @@ struct esync *create_esync( struct object *root, const struct unicode_str *name,
+                 struct mutex *mutex = get_shm( esync->shm_idx );
+                 mutex->tid = initval ? 0 : current->id;
+                 mutex->count = initval ? 0 : 1;
++                /* shm_idx is derived from the fd number, which the kernel
++                 * can and does reuse after a handle is closed, so this slot
++                 * may hold stale data from a previous, unrelated mutex.
++                 * Reset the new field explicitly rather than assuming the
++                 * page was zero-filled by a fresh ftruncate(). */
++                mutex->waiters = 0;
+                 list_add_tail( &mutex_list, &esync->mutex_entry );
+                 break;
+             }
+@@ -532,6 +570,17 @@ void esync_reset_event( struct esync *esync )
+     }
+ }
+ 
++#ifdef __linux__
++/* Not FUTEX_WAKE_PRIVATE: the mutex's shm page is a MAP_SHARED mapping
++ * visible in the wineserver's address space *and* every client process's
++ * address space, so this is by definition not private to one process. The
++ * server needs to be able to wake a client-side futex_wait() from here. */
++static inline void futex_wake_shared( void *addr, int count )
++{
++    syscall( SYS_futex, addr, FUTEX_WAKE, count, NULL, NULL, 0 );
++}
++#endif
++
+ void esync_abandon_mutexes( struct thread *thread )
+ {
+     struct esync *esync;
+@@ -547,6 +596,13 @@ void esync_abandon_mutexes( struct thread *thread )
+             mutex->tid = ~0;
+             mutex->count = 0;
+             esync_wake_fd( esync->fd );
++#ifdef __linux__
++            /* Also wake any client blocked in the new single-object futex
++             * fast path (see esync_wait_mutex_fast() client-side) -- it
++             * never touches the eventfd at all, so esync_wake_fd() alone
++             * would not reach it. */
++            futex_wake_shared( &mutex->tid, INT_MAX );
++#endif
+         }
+     }
+ }
