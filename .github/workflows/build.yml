@@ -40,7 +40,7 @@ jobs:
 
     - name: "Download Latest Release Rat Packages"
       run: |
-        curl -LO# https://github.com/KreitinnSoftware/Windroid-RootFS-Generator/releases/download/$(curl -s https://api.github.com/repos/KreitinnSoftware/Windroid-RootFS-Generator/releases | grep tag_name -m 1 | cut -d ":" -f 2 | sed "s/\"//g" | sed "s/,//g" | sed "s/ //g")/Windroid-Packages.zip || true
+        curl -LO# https://github.com/WINDROID-EMU/Windroid-RootFS-Generator/releases/download/$(curl -s https://api.github.com/repos/WINDROID-EMU/Windroid-RootFS-Generator/releases | grep tag_name -m 1 | cut -d ":" -f 2 | sed "s/\"//g" | sed "s/,//g" | sed "s/ //g")/Windroid-Packages.zip || true
         sudo unzip -o Windroid-Packages.zip -d /mnt/arch/Windroid-RootFS-Generator/built-pkgs || true
         rm -f Windroid-Packages.zip
 
