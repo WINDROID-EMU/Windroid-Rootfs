@@ -14,6 +14,17 @@ export INIT_DIR=$PWD
 export ARCH=$1
 export GIT_SHORT_SHA=$(git rev-parse --short HEAD)
 
+# Auto-increment version for RootFS
+VERSION_FILE="$INIT_DIR/.rootfs-version"
+if [ -f "$VERSION_FILE" ]; then
+  CURRENT_VERSION=$(cat "$VERSION_FILE")
+else
+  CURRENT_VERSION=10
+fi
+NEXT_VERSION=$((CURRENT_VERSION + 1))
+echo $NEXT_VERSION > "$VERSION_FILE"
+export ROOTFS_VERSION="(V$NEXT_VERSION)"
+
 if [ ! -d "$INIT_DIR/built-pkgs" ]; then
   echo "built-pkgs: Don't Exist. Run 'build-all.sh' for generate the needed libs for creating a rootfs for MiceWine."
   exit 0
@@ -94,7 +105,7 @@ done
 
 mv new_makeSymlinks.sh makeSymlinks.sh
 
-$INIT_DIR/tools/create-rat-pkg.sh "Windroid-RootFS" "Windroid RootFS" "" "$ARCH" "($GIT_SHORT_SHA)" "rootfs" "$PWD" "$INIT_DIR"
+$INIT_DIR/tools/create-rat-pkg.sh "Windroid-RootFS" "Windroid RootFS $ROOTFS_VERSION" "" "$ARCH" "($GIT_SHORT_SHA)" "rootfs" "$PWD" "$INIT_DIR"
 
 cd "$INIT_DIR"
 

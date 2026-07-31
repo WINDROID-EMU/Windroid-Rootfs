@@ -5,3 +5,4 @@ rootfs
 built-pkgs
 wine-utils
 *.rat
+.rootfs-version
