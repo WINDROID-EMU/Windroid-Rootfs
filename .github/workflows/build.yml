@@ -40,9 +40,14 @@ jobs:
 
     - name: "Download Latest Release Rat Packages"
       run: |
-        curl -LO# https://github.com/WINDROID-EMU/Windroid-RootFS-Generator/releases/download/$(curl -s https://api.github.com/repos/WINDROID-EMU/Windroid-RootFS-Generator/releases | grep tag_name -m 1 | cut -d ":" -f 2 | sed "s/\"//g" | sed "s/,//g" | sed "s/ //g")/Windroid-Packages.zip || true
-        sudo unzip -o Windroid-Packages.zip -d /mnt/arch/Windroid-RootFS-Generator/built-pkgs || true
-        rm -f Windroid-Packages.zip
+        LATEST_TAG=$(curl -s https://api.github.com/repos/WINDROID-EMU/Windroid-Rootfs/releases | grep tag_name -m 1 | cut -d ":" -f 2 | sed "s/\"//g" | sed "s/,//g" | sed "s/ //g")
+        if [ -n "$LATEST_TAG" ]; then
+          curl -LO# https://github.com/WINDROID-EMU/Windroid-Rootfs/releases/download/$LATEST_TAG/Windroid-Packages.zip || true
+          sudo unzip -o Windroid-Packages.zip -d /mnt/arch/Windroid-RootFS-Generator/built-pkgs || true
+          rm -f Windroid-Packages.zip
+        else
+          echo "No previous releases found, performing clean build"
+        fi
 
     - name: "Setup Basic Android (x86_64) Runtime Environment (Required for Building x86_64 glib)"
       run: |
