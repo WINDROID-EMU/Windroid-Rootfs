@@ -1,5 +1,5 @@
 diff --git a/dlls/ntdll/sync.c b/dlls/ntdll/sync.c
-index 522ce0a2142..6c90dad1ea5 100644
+index 522ce0a2142..b918d1d6e48 100644
 --- a/dlls/ntdll/sync.c
 +++ b/dlls/ntdll/sync.c
 @@ -351,6 +351,27 @@ NTSTATUS WINAPI RtlpUnWaitCriticalSection( RTL_CRITICAL_SECTION *crit )
@@ -86,7 +86,7 @@ index 522ce0a2142..6c90dad1ea5 100644
      {
          InterlockedIncrement( &crit->LockCount );
          crit->RecursionCount++;
-@@ -433,10 +475,39 @@ BOOL WINAPI RtlIsCriticalSectionLockedByThread( RTL_CRITICAL_SECTION *crit )
+@@ -433,10 +475,52 @@ BOOL WINAPI RtlIsCriticalSectionLockedByThread( RTL_CRITICAL_SECTION *crit )
   */
  NTSTATUS WINAPI RtlLeaveCriticalSection( RTL_CRITICAL_SECTION *crit )
  {
@@ -95,18 +95,31 @@ index 522ce0a2142..6c90dad1ea5 100644
 +    /* Verify thread ownership before allowing leave operation */
 +    if (crit->OwningThread != current_thread)
 +    {
++        /* If owning thread is 0 (invalid), this indicates corruption.
++         * Allow the leave operation to proceed to avoid deadlocks. */
++        if (crit->OwningThread == 0)
++        {
++            WARN( "section %p %s has invalid owner (0), allowing leave to avoid deadlock\n", 
++                  crit, debugstr_a( crit_section_get_name( crit )));
++            crit->RecursionCount = 0;
++            crit->OwningThread = 0;
++            crit->LockCount = -1;
++            return STATUS_SUCCESS;
++        }
++        
 +        ERR( "section %p %s is not owned by current thread %04lx (owned by %04lx)\n", 
 +             crit, debugstr_a( crit_section_get_name( crit )), 
 +             HandleToULong(current_thread), HandleToULong(crit->OwningThread) );
 +        
 +        /* Attempt recovery: if the section appears to be in an invalid state,
-+         * reset it to prevent further corruption */
++         * reset it to prevent further corruption and avoid deadlock */
 +        if (crit->RecursionCount <= 0)
 +        {
-+            WARN( "Attempting to recover corrupted critical section %p\n", crit );
++            WARN( "Attempting to recover corrupted critical section %p to avoid deadlock\n", crit );
 +            crit->RecursionCount = 0;
 +            crit->OwningThread = 0;
 +            crit->LockCount = -1;
++            return STATUS_SUCCESS;  /* Return success to avoid deadlock */
 +        }
 +        return STATUS_UNSUCCESSFUL;
 +    }
@@ -122,7 +135,7 @@ index 522ce0a2142..6c90dad1ea5 100644
 +            crit->RecursionCount = 0;
 +            crit->OwningThread = 0;
 +            crit->LockCount = -1;
-+            return STATUS_UNSUCCESSFUL;
++            return STATUS_SUCCESS;  /* Return success to avoid deadlock */
 +        }
      }
      else
