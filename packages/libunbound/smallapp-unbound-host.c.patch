@@ -5,7 +5,7 @@
  	printf("			pass as first argument if you want to override some\n");
  	printf("			options with further arguments\n");
 -	printf("    -r			read forwarder information from /etc/resolv.conf\n");
-+	printf("    -r			read forwarder information from /data/data/com.micewine.emu/files/usr/etc/resolv.conf\n");
++	printf("    -r			read forwarder information from /data/data/com.windroid.emu/files/usr/etc/resolv.conf\n");
  	printf("      			breaks validation if the forwarder does not do DNSSEC.\n");
  	printf("    -v			be more verbose, shows nodata and security.\n");
  	printf("    -d			debug, traces the action, -d -d shows more.\n");
@@ -14,7 +14,7 @@
  			break;
  		case 'r':
 -			check_ub_res(ub_ctx_resolvconf(ctx, "/etc/resolv.conf"));
-+			check_ub_res(ub_ctx_resolvconf(ctx, "/data/data/com.micewine.emu/files/usr/etc/resolv.conf"));
++			check_ub_res(ub_ctx_resolvconf(ctx, "/data/data/com.windroid.emu/files/usr/etc/resolv.conf"));
  			break;
  		case 't':
  			qtype = optarg;

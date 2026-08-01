@@ -333,21 +333,21 @@ diff -uNr 30-pulseaudio/src/modules/echo-cancel/module-echo-cancel.c 30-pulseaud
      if (u->save_aec) {
 -        pa_log("Creating AEC files in /tmp");
 -        u->captured_file = fopen("/tmp/aec_rec.sw", "wb");
-+        pa_log("Creating AEC files in /data/data/com.micewine.emu/files/usr/tmp");
-+        u->captured_file = fopen("/data/data/com.micewine.emu/files/usr/tmp/aec_rec.sw", "wb");
++        pa_log("Creating AEC files in /data/data/com.windroid.emu/files/usr/tmp");
++        u->captured_file = fopen("/data/data/com.windroid.emu/files/usr/tmp/aec_rec.sw", "wb");
          if (u->captured_file == NULL)
              perror ("fopen failed");
 -        u->played_file = fopen("/tmp/aec_play.sw", "wb");
-+        u->played_file = fopen("/data/data/com.micewine.emu/files/usr/tmp/aec_play.sw", "wb");
++        u->played_file = fopen("/data/data/com.windroid.emu/files/usr/tmp/aec_play.sw", "wb");
          if (u->played_file == NULL)
              perror ("fopen failed");
 -        u->canceled_file = fopen("/tmp/aec_out.sw", "wb");
-+        u->canceled_file = fopen("/data/data/com.micewine.emu/files/usr/tmp/aec_out.sw", "wb");
++        u->canceled_file = fopen("/data/data/com.windroid.emu/files/usr/tmp/aec_out.sw", "wb");
          if (u->canceled_file == NULL)
              perror ("fopen failed");
          if (u->ec->params.drift_compensation) {
 -            u->drift_file = fopen("/tmp/aec_drift.txt", "w");
-+            u->drift_file = fopen("/data/data/com.micewine.emu/files/usr/tmp/aec_drift.txt", "w");
++            u->drift_file = fopen("/data/data/com.windroid.emu/files/usr/tmp/aec_drift.txt", "w");
              if (u->drift_file == NULL)
                  perror ("fopen failed");
          }
@@ -371,7 +371,7 @@ diff -uNr 30-pulseaudio/src/modules/module-pipe-source.c 30-pulseaudio-mod/src/m
          "channel_map=<channel map>");
  
 -#define DEFAULT_FILE_NAME "/tmp/music.input"
-+#define DEFAULT_FILE_NAME "/data/data/com.micewine.emu/files/usr/tmp/music.input"
++#define DEFAULT_FILE_NAME "/data/data/com.windroid.emu/files/usr/tmp/music.input"
  #define DEFAULT_SOURCE_NAME "fifo_input"
  
  struct userdata {
@@ -383,15 +383,15 @@ diff -uNr 30-pulseaudio/src/modules/module-protocol-stub.c 30-pulseaudio-mod/src
       * Moreover, Esound Unix sockets haven't been supported on Windows historically. */
  #    if defined(USE_PER_USER_ESOUND_SOCKET) && !defined(OS_IS_WIN32)
 -    u->socket_path = pa_sprintf_malloc("/tmp/.esd-%lu/socket", (unsigned long) getuid());
-+    u->socket_path = pa_sprintf_malloc("/data/data/com.micewine.emu/files/usr/tmp/.esd-%lu/socket", (unsigned long) getuid());
++    u->socket_path = pa_sprintf_malloc("/data/data/com.windroid.emu/files/usr/tmp/.esd-%lu/socket", (unsigned long) getuid());
  #    else
 -    u->socket_path = pa_xstrdup("/tmp/.esd/socket");
-+    u->socket_path = pa_xstrdup("/data/data/com.micewine.emu/files/usr/tmp/.esd/socket");
++    u->socket_path = pa_xstrdup("/data/data/com.windroid.emu/files/usr/tmp/.esd/socket");
  #    endif
  
      /* This socket doesn't reside in our own runtime dir but in
 -     * /tmp/.esd/, hence we have to create the dir first */
-+     * /data/data/com.micewine.emu/files/usr/tmp/.esd/, hence we have to create the dir first */
++     * /data/data/com.windroid.emu/files/usr/tmp/.esd/, hence we have to create the dir first */
  
      if (pa_make_secure_parent_dir(u->socket_path, pa_in_system_mode() ? 0755U : 0700U, (uid_t)-1, (gid_t)-1, false) < 0) {
          pa_log("Failed to create socket directory '%s': %s\n", u->socket_path, pa_cstrerror(errno));
@@ -1507,7 +1507,7 @@ diff -uNr 30-pulseaudio/src/pulsecore/core-util.c 30-pulseaudio-mod/src/pulsecor
       * this directory, we try XDG_RUNTIME_DIR first, and if that isn't
       * set create a directory in $HOME and link it to a random subdir
 -     * in /tmp, if it was not explicitly configured. */
-+     * in /data/data/com.micewine.emu/files/usr/tmp, if it was not explicitly configured. */
++     * in /data/data/com.windroid.emu/files/usr/tmp, if it was not explicitly configured. */
  
      m = pa_in_system_mode() ? 0755U : 0700U;
  
@@ -1516,7 +1516,7 @@ diff -uNr 30-pulseaudio/src/pulsecore/core-util.c 30-pulseaudio-mod/src/pulsecor
  #ifdef HAVE_SYMLINK
              /* Hmm, so the runtime directory didn't exist yet, so let's
 -             * create one in /tmp and symlink that to it */
-+             * create one in /data/data/com.micewine.emu/files/usr/tmp and symlink that to it */
++             * create one in /data/data/com.windroid.emu/files/usr/tmp and symlink that to it */
  
              if (make_random_dir_and_link(0700, k) < 0) {
  
@@ -1526,8 +1526,8 @@ diff -uNr 30-pulseaudio/src/pulsecore/core-util.c 30-pulseaudio-mod/src/pulsecor
  #if !defined(OS_IS_WIN32)
 -        (f = pa_fopen_cloexec("/etc/machine-id", "r")) ||
 -        (f = pa_fopen_cloexec("/var/lib/dbus/machine-id", "r"))
-+        (f = pa_fopen_cloexec("/data/data/com.micewine.emu/files/usr/etc/machine-id", "r")) ||
-+        (f = pa_fopen_cloexec("/data/data/com.micewine.emu/files/usr/var/lib/dbus/machine-id", "r"))
++        (f = pa_fopen_cloexec("/data/data/com.windroid.emu/files/usr/etc/machine-id", "r")) ||
++        (f = pa_fopen_cloexec("/data/data/com.windroid.emu/files/usr/var/lib/dbus/machine-id", "r"))
  #else
          false
  #endif
@@ -1536,7 +1536,7 @@ diff -uNr 30-pulseaudio/src/pulsecore/core-util.c 30-pulseaudio-mod/src/pulsecor
          return t;
  
 -    return "/tmp";
-+    return "/data/data/com.micewine.emu/files/usr/tmp";
++    return "/data/data/com.windroid.emu/files/usr/tmp";
  }
  
  int pa_open_cloexec(const char *fn, int flags, mode_t mode) {
@@ -1549,8 +1549,8 @@ diff -uNr 30-pulseaudio/src/pulsecore/esound.h 30-pulseaudio-mod/src/pulsecore/e
  /* path and name of the default EsounD domain socket */
 -#define ESD_UNIX_SOCKET_DIR     "/tmp/.esd"
 -#define ESD_UNIX_SOCKET_NAME    "/tmp/.esd/socket"
-+#define ESD_UNIX_SOCKET_DIR     "/data/data/com.micewine.emu/files/usr/tmp/.esd"
-+#define ESD_UNIX_SOCKET_NAME    "/data/data/com.micewine.emu/files/usr/tmp/.esd/socket"
++#define ESD_UNIX_SOCKET_DIR     "/data/data/com.windroid.emu/files/usr/tmp/.esd"
++#define ESD_UNIX_SOCKET_NAME    "/data/data/com.windroid.emu/files/usr/tmp/.esd/socket"
  
  /* length of the audio buffer size */
  #define ESD_BUF_SIZE (4 * 1024)
@@ -1595,7 +1595,7 @@ diff -uNr 30-pulseaudio/src/pulsecore/shm.c 30-pulseaudio-mod/src/pulsecore/shm.
   * /dev/shm. We can use that information to list all blocks and
   * cleanup unused ones */
 -#define SHM_PATH "/dev/shm/"
-+#define SHM_PATH "/data/data/com.micewine.emu/files/usr/tmp/"
++#define SHM_PATH "/data/data/com.windroid.emu/files/usr/tmp/"
  #define SHM_ID_LEN 10
  #elif defined(__sun)
  #define SHM_PATH "/tmp"

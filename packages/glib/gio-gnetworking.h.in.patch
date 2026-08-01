@@ -5,7 +5,7 @@
  
  #ifndef _PATH_RESCONF
 -#define _PATH_RESCONF "/etc/resolv.conf"
-+#define _PATH_RESCONF "/data/data/com.micewine.emu/files/usr/etc/resolv.conf"
++#define _PATH_RESCONF "/data/data/com.windroid.emu/files/usr/etc/resolv.conf"
  #endif
  
  #ifndef CMSG_LEN

@@ -5,7 +5,7 @@
  
    if (xdg_data_dirs == NULL)
 -    xdg_data_dirs = "/usr/local/share/:/usr/share/";
-+    xdg_data_dirs = "/data/data/com.micewine.emu/files/usr/local/share/:/data/data/com.micewine.emu/files/usr/share/";
++    xdg_data_dirs = "/data/data/com.windroid.emu/files/usr/local/share/:/data/data/com.windroid.emu/files/usr/share/";
  
    /* Work out how many dirs we’re dealing with. */
    if (xdg_data_home != NULL || home != NULL)

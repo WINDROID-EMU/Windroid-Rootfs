@@ -9,7 +9,7 @@ if [ "$1" != "aarch64" ] && [ "$1" != "x86_64" ]; then
   exit 0
 fi
 
-export PREFIX=/data/data/com.micewine.emu/files/usr
+export PREFIX=/data/data/com.windroid.emu/files/usr
 export INIT_DIR=$PWD
 export ARCH=$1
 export GIT_SHORT_SHA=$(git rev-parse --short HEAD)

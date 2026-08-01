@@ -5,7 +5,7 @@
         */
        
 -      path = "/bin:/usr/bin:.";
-+      path = "/data/data/com.micewine.emu/files/usr/bin:.";
++      path = "/data/data/com.windroid.emu/files/usr/bin:.";
      }
  #else
    n = GetModuleFileNameW (NULL, wfilename, MAXPATHLEN);
@@ -14,7 +14,7 @@
          {
            g_free (tmp);
 -          tmp = g_strdup ("/tmp");
-+          tmp = g_strdup ("/data/data/com.micewine.emu/files/usr/tmp");
++          tmp = g_strdup ("/data/data/com.windroid.emu/files/usr/tmp");
          }
  #endif /* !G_OS_WIN32 */
  
@@ -23,7 +23,7 @@
      return NULL;
  #elif defined (G_OS_UNIX)
 -  const gchar * const os_release_files[] = { "/etc/os-release", "/usr/lib/os-release" };
-+  const gchar * const os_release_files[] = { "/data/data/com.micewine.emu/files/usr/etc/os-release", "/data/data/com.micewine.emu/files/usr/lib/os-release" };
++  const gchar * const os_release_files[] = { "/data/data/com.windroid.emu/files/usr/etc/os-release", "/data/data/com.windroid.emu/files/usr/lib/os-release" };
    gsize i;
    gchar *buffer = NULL;
    gchar *result = NULL;
@@ -32,7 +32,7 @@
  #ifndef G_OS_WIN32
    if (!data_dirs || !data_dirs[0])
 -    data_dirs = "/usr/local/share/:/usr/share/";
-+    data_dirs = "/data/data/com.micewine.emu/files/usr/local/share/:/data/data/com.micewine.emu/files/usr/share/";
++    data_dirs = "/data/data/com.windroid.emu/files/usr/local/share/:/data/data/com.windroid.emu/files/usr/share/";
  
    data_dir_vector = g_strsplit (data_dirs, G_SEARCHPATH_SEPARATOR_S, 0);
  #else

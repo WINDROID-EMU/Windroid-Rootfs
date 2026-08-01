@@ -5,7 +5,7 @@
  {
    GError *error = NULL;
 -  const char *dir = "/etc/glib-2.0/settings";
-+  const char *dir = "/data/data/com.micewine.emu/files/usr/etc/glib-2.0/settings";
++  const char *dir = "/data/data/com.windroid.emu/files/usr/etc/glib-2.0/settings";
    char *path;
    char *contents;
  

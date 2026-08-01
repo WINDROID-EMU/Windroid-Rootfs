@@ -5,12 +5,12 @@
  
  #ifndef ICONDIR
 -#define ICONDIR "/usr/X11R6/lib/X11/icons"
-+#define ICONDIR "/data/data/com.micewine.emu/files/usr/X11R6/lib/X11/icons"
++#define ICONDIR "/data/data/com.windroid.emu/files/usr/X11R6/lib/X11/icons"
  #endif
  
  #ifndef XCURSORPATH
 -#define XCURSORPATH "~/.local/share/icons:~/.icons:/usr/share/icons:/usr/share/pixmaps:"ICONDIR
-+#define XCURSORPATH "~/.local/share/icons:~/.icons:/data/data/com.micewine.emu/files/usr/share/icons:/data/data/com.micewine.emu/files/usr/share/pixmaps:"ICONDIR
++#define XCURSORPATH "~/.local/share/icons:~/.icons:/data/data/com.windroid.emu/files/usr/share/icons:/data/data/com.windroid.emu/files/usr/share/pixmaps:"ICONDIR
  #endif
  
  typedef struct XcursorInherit {

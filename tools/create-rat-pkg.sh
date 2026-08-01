@@ -34,7 +34,7 @@ if [ $# -lt 8 ]; then
 fi
 
 export INIT_DIR=$PWD
-export APP_ROOT_DIR=/data/data/com.micewine.emu/
+export APP_ROOT_DIR=/data/data/com.windroid.emu/
 
 export PACKAGE_NAME=$1
 export PACKAGE_PRETTY_NAME=$2
@@ -53,7 +53,7 @@ fi
 export WORKDIR="$DESTDIR_PKG"
 
 if [ -d "$DESTDIR_PKG/data/" ]; then
-	WORKDIR="$DESTDIR_PKG/data/data/com.micewine.emu/"
+	WORKDIR="$DESTDIR_PKG/data/data/com.windroid.emu/"
 fi
 
 cd $WORKDIR

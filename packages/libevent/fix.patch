@@ -16,7 +16,7 @@ diff -uNr 49-libevent/evdns.c 49-libevent.mod/evdns.c
  	return path_out;
  #else
 -	return mm_strdup("/etc/hosts");
-+	return mm_strdup("/data/data/com.micewine.emu/files/usr/etc/hosts");
++	return mm_strdup("/data/data/com.windroid.emu/files/usr/etc/hosts");
  #endif
  }
  

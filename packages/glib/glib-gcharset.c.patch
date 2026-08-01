@@ -5,7 +5,7 @@
      {
        GHashTable *table = g_hash_table_new (g_str_hash, g_str_equal);
 -      read_aliases ("/usr/share/locale/locale.alias", table);
-+      read_aliases ("/data/data/com.micewine.emu/files/usr/share/locale/locale.alias", table);
++      read_aliases ("/data/data/com.windroid.emu/files/usr/share/locale/locale.alias", table);
        g_once_init_leave_pointer (&alias_table, table);
      }
  

@@ -4,7 +4,7 @@
         * */
  
 -      chosen_search_path = "/bin:/usr/bin:.";
-+      chosen_search_path = "/data/data/com.micewine.emu/files/usr/bin:.";
++      chosen_search_path = "/data/data/com.windroid.emu/files/usr/bin:.";
      }
  
    if (search_path || search_path_from_envp)
@@ -13,7 +13,7 @@
      return FALSE;
  
 -  argv_buffer[0] = (char *) "/bin/sh";
-+  argv_buffer[0] = (char *) "/data/data/com.micewine.emu/files/usr/bin/sh";
++  argv_buffer[0] = (char *) "/data/data/com.windroid.emu/files/usr/bin/sh";
    argv_buffer[1] = (char *) file;
    while (argc > 0)
      {

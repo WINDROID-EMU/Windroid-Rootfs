@@ -22,11 +22,11 @@ diff -uNr mesa-vulkan-wrapper/src/vulkan/wrapper/wrapper_instance.c mesa-vulkan-
 +   char *file_redirect_dir = getenv("ADRENOTOOLS_FILE_REDIRECT_DIR");
 +
 +   if (hook_lib_dir == NULL) {
-+        hook_lib_dir = "/data/data/com.micewine.emu/files/usr/lib/";
++        hook_lib_dir = "/data/data/com.windroid.emu/files/usr/lib/";
 +   }
 +
 +   if (custom_driver_dir == NULL) {
-+        custom_driver_dir = "/data/data/com.micewine.emu/files/home/hook/";
++        custom_driver_dir = "/data/data/com.windroid.emu/files/home/hook/";
 +   }
 +
 +   char *use_adrenotools = getenv("USE_ADRENOTOOLS");

@@ -473,12 +473,12 @@ compileAll()
 			exit 0
 		fi
 
-		if [ ! -d "$packageDestDirPkg/data/data/com.micewine.emu" ]; then
+		if [ ! -d "$packageDestDirPkg/data/data/com.windroid.emu" ]; then
 			echo "- [$packageNum/$packageCount] Package: '"$package"' failed to compile. Check logs"
 			exit 0
 		fi
 
-		cp -rf "$packageDestDirPkg/data/data/com.micewine.emu/"* "/data/data/com.micewine.emu"
+		cp -rf "$packageDestDirPkg/data/data/com.windroid.emu/"* "/data/data/com.windroid.emu"
 
 		find "$packageDestDirPkg" -type f > "$INIT_DIR/logs/$package-package-files.txt"
 
@@ -533,7 +533,7 @@ case $1 in "aarch64"|"x86_64")
 	exit 0
 esac
 
-export APP_ROOT_DIR=/data/data/com.micewine.emu
+export APP_ROOT_DIR=/data/data/com.windroid.emu
 export PREFIX=$APP_ROOT_DIR/files/usr
 
 if [ ! -e "$PREFIX" ]; then
