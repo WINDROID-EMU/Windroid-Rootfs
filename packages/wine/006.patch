@@ -1,28 +1,3 @@
-diff --git a/README.esync b/README.esync
-index 11d86563a10..c020a92e01f 100644
---- a/README.esync
-+++ b/README.esync
-@@ -161,13 +161,13 @@ surprisingly there aren't that many. In particular:
-   miss the notification for a kernel APC, so in a sense we're not necessarily
-   doing anything wrong.
- 
--There are some things that are perfectly implementable but that I just haven't
--done yet:
--* Other synchronizable server primitives. It's unlikely we'll need any of
--  these, except perhaps named pipes (which would honestly be rather difficult)
--  and (maybe) timers.
--* Access masks. We'd need to store these inside ntdll, and validate them when
--  someone tries to execute esync operations.
-+There are some things that are perfectly implementable:
-+* Access masks: Access masks are retrieved from the server (via get_esync_fd reply or during create/open) and stored in the ntdll struct esync table. Operations like esync_release_semaphore, esync_set_event, esync_reset_event, esync_pulse_event, esync_release_mutex, and __esync_wait_objects validate the handle's access mask (checking for rights such as SEMAPHORE_MODIFY_STATE, EVENT_MODIFY_STATE, MUTANT_QUERY_STATE, or SYNCHRONIZE) and return STATUS_ACCESS_DENIED if the necessary access rights are not granted.
-+* Mixed Waits & Pseudo-handles: Pseudo-handles (GetCurrentProcess and GetCurrentThread) are resolved to esync fd primitives and cached in ntdll. Mixed waits (waiting on both esync eventfds and server-bound objects simultaneously) are now supported in __esync_wait_objects using step-interval polling and non-blocking server waits.
-+* Waitable Timers: Timers use server-backed esync_fd descriptors. Timer set and cancel handlers clean unread signals on cancel/reset to prevent stale wakeups.
-+* PulseEvent(): Enhanced to update shared memory event->signaled state under spinlock protection for manual and auto-reset events, allowing fast-path wait checks to reliably catch pulsed notifications before resetting.
-+* Named Pipes: Enabled default_fd_get_esync_fd for named_pipe_device_file_ops and named_pipe_dir_ops, allowing wait operations on Named Pipe device files and directories to leverage esync_fd file descriptors directly.
-+* Sockets & Debug Objects: Enabled esync_fd for sock_ops and debug_obj_ops, providing esync_fd support for socket wait operations and debug object event queues.
- 
- This patchset was inspired by Daniel Santos' "hybrid synchronization"
- patchset. My idea was to create a framework whereby even contended waits could
 diff --git a/dlls/ntdll/tests/sync.c b/dlls/ntdll/tests/sync.c
 index b7c278f00ab..6688b126fc3 100644
 --- a/dlls/ntdll/tests/sync.c
