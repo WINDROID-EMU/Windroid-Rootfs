@@ -1,3 +1,28 @@
+diff --git a/README.esync b/README.esync
+index 11d86563a10..c020a92e01f 100644
+--- a/README.esync
++++ b/README.esync
+@@ -161,13 +161,13 @@ surprisingly there aren't that many. In particular:
+   miss the notification for a kernel APC, so in a sense we're not necessarily
+   doing anything wrong.
+ 
+-There are some things that are perfectly implementable but that I just haven't
+-done yet:
+-* Other synchronizable server primitives. It's unlikely we'll need any of
+-  these, except perhaps named pipes (which would honestly be rather difficult)
+-  and (maybe) timers.
+-* Access masks. We'd need to store these inside ntdll, and validate them when
+-  someone tries to execute esync operations.
++There are some things that are perfectly implementable:
++* Access masks: Access masks are retrieved from the server (via get_esync_fd reply or during create/open) and stored in the ntdll struct esync table. Operations like esync_release_semaphore, esync_set_event, esync_reset_event, esync_pulse_event, esync_release_mutex, and __esync_wait_objects validate the handle's access mask (checking for rights such as SEMAPHORE_MODIFY_STATE, EVENT_MODIFY_STATE, MUTANT_QUERY_STATE, or SYNCHRONIZE) and return STATUS_ACCESS_DENIED if the necessary access rights are not granted.
++* Mixed Waits & Pseudo-handles: Pseudo-handles (GetCurrentProcess and GetCurrentThread) are resolved to esync fd primitives and cached in ntdll. Mixed waits (waiting on both esync eventfds and server-bound objects simultaneously) are now supported in __esync_wait_objects using step-interval polling and non-blocking server waits.
++* Waitable Timers: Timers use server-backed esync_fd descriptors. Timer set and cancel handlers clean unread signals on cancel/reset to prevent stale wakeups.
++* PulseEvent(): Enhanced to update shared memory event->signaled state under spinlock protection for manual and auto-reset events, allowing fast-path wait checks to reliably catch pulsed notifications before resetting.
++* Named Pipes: Enabled default_fd_get_esync_fd for named_pipe_device_file_ops and named_pipe_dir_ops, allowing wait operations on Named Pipe device files and directories to leverage esync_fd file descriptors directly.
++* Sockets & Debug Objects: Enabled esync_fd for sock_ops and debug_obj_ops, providing esync_fd support for socket wait operations and debug object event queues.
+ 
+ This patchset was inspired by Daniel Santos' "hybrid synchronization"
+ patchset. My idea was to create a framework whereby even contended waits could
 diff --git a/dlls/ntdll/tests/sync.c b/dlls/ntdll/tests/sync.c
 index b7c278f00ab..6688b126fc3 100644
 --- a/dlls/ntdll/tests/sync.c
@@ -46,7 +71,7 @@ index b7c278f00ab..6688b126fc3 100644
      NtClose( semaphore );
  }
 diff --git a/dlls/ntdll/unix/esync.c b/dlls/ntdll/unix/esync.c
-index 02a93f134ad..4a3bd2ca22a 100644
+index 02a93f134ad..6791b3610ce 100644
 --- a/dlls/ntdll/unix/esync.c
 +++ b/dlls/ntdll/unix/esync.c
 @@ -76,6 +76,7 @@ struct esync
@@ -57,7 +82,86 @@ index 02a93f134ad..4a3bd2ca22a 100644
  };
  
  struct semaphore
-@@ -237,7 +238,7 @@ static inline UINT_PTR handle_to_index( HANDLE handle, UINT_PTR *entry )
+@@ -111,68 +112,45 @@ static pthread_mutex_t shm_addrs_mutex = PTHREAD_MUTEX_INITIALIZER;
+ #include <alloca.h>
+ #include <errno.h>
+ static int shm_unlink(const char *name) {
+-    size_t namelen;
+     const char *env_tmpdir = getenv("TMPDIR");
+     const char *default_tmpdir = "/data/data/com.windroid.emu/files/usr/tmp/";
+-
++    const char *dir = env_tmpdir ? env_tmpdir : default_tmpdir;
+     char fname[1024];
++    size_t pathlen;
+ 
+-    if (env_tmpdir) {
+-        size_t pathlen = strlen(env_tmpdir);
+-        snprintf(fname, sizeof(fname), "%s%s", env_tmpdir, (env_tmpdir[pathlen - 1] == '/') ? "" : "/");
+-    } else {
+-        snprintf(fname, sizeof(fname), "%s", default_tmpdir);
+-    }
+-
+-    /* Construct the filename.  */
+     while (name[0] == '/') ++name;
+-
+     if (name[0] == '\0') {
+-        /* The name "/" is not supported.  */
+         errno = EINVAL;
+         return -1;
+     }
+ 
+-    strcat(fname, name);
+-
++    pathlen = strlen(dir);
++    snprintf(fname, sizeof(fname), "%s%s%s", dir, (pathlen > 0 && dir[pathlen - 1] == '/') ? "" : "/", name);
+     return unlink(fname);
+ }
+ 
+ static int shm_open(const char *name, int oflag, mode_t mode) {
+-    size_t namelen;
+-    int fd;
+     const char *env_tmpdir = getenv("TMPDIR");
+     const char *default_tmpdir = "/data/data/com.windroid.emu/files/usr/tmp/";
+-
++    const char *dir = env_tmpdir ? env_tmpdir : default_tmpdir;
+     char fname[1024];
++    size_t pathlen;
++    int fd;
+ 
+-    if (env_tmpdir) {
+-        size_t pathlen = strlen(env_tmpdir);
+-        snprintf(fname, sizeof(fname), "%s%s", env_tmpdir, (env_tmpdir[pathlen - 1] == '/') ? "" : "/");
+-    } else {
+-        snprintf(fname, sizeof(fname), "%s", default_tmpdir);
+-    }
+-
+-    /* Construct the filename.  */
+     while (name[0] == '/') ++name;
+-
+     if (name[0] == '\0') {
+-        /* The name "/" is not supported.  */
+         errno = EINVAL;
+         return -1;
+     }
+ 
+-    strcat(fname, name);
++    pathlen = strlen(dir);
++    snprintf(fname, sizeof(fname), "%s%s%s", dir, (pathlen > 0 && dir[pathlen - 1] == '/') ? "" : "/", name);
+ 
+     fd = open(fname, oflag, mode);
+     if (fd != -1) {
+-        /* We got a descriptor.  Now set the FD_CLOEXEC bit.  */
+         int flags = fcntl(fd, F_GETFD, 0);
+         flags |= FD_CLOEXEC;
+-        flags = fcntl(fd, F_SETFD, flags);
+-
+-        if (flags == -1) {
+-            /* Something went wrong.  We cannot return the descriptor.  */
++        if (fcntl(fd, F_SETFD, flags) == -1) {
+             int save_errno = errno;
+             close(fd);
+             fd = -1;
+@@ -237,7 +215,7 @@ static inline UINT_PTR handle_to_index( HANDLE handle, UINT_PTR *entry )
      return idx % ESYNC_LIST_BLOCK_SIZE;
  }
  
@@ -66,7 +170,7 @@ index 02a93f134ad..4a3bd2ca22a 100644
  {
      UINT_PTR entry, idx = handle_to_index( handle, &entry );
  
-@@ -263,6 +264,7 @@ static struct esync *add_to_list( HANDLE handle, enum esync_type type, int fd, v
+@@ -263,6 +241,7 @@ static struct esync *add_to_list( HANDLE handle, enum esync_type type, int fd, v
      {
          esync_list[entry][idx].fd = fd;
          esync_list[entry][idx].shm = shm;
@@ -74,7 +178,7 @@ index 02a93f134ad..4a3bd2ca22a 100644
      }
      return &esync_list[entry][idx];
  }
-@@ -286,6 +288,7 @@ static NTSTATUS get_object( HANDLE handle, struct esync **obj )
+@@ -286,6 +265,7 @@ static NTSTATUS get_object( HANDLE handle, struct esync **obj )
      int ret = STATUS_SUCCESS;
      enum esync_type type = 0;
      unsigned int shm_idx = 0;
@@ -82,7 +186,81 @@ index 02a93f134ad..4a3bd2ca22a 100644
      obj_handle_t fd_handle;
      sigset_t sigset;
      int fd = -1;
-@@ -316,6 +319,7 @@ static NTSTATUS get_object( HANDLE handle, struct esync **obj )
+@@ -294,7 +274,72 @@ static NTSTATUS get_object( HANDLE handle, struct esync **obj )
+ 
+     if ((INT_PTR)handle < 0)
+     {
+-        /* We can deal with pseudo-handles, but it's just easier this way */
++        if (handle == (HANDLE)-1 || handle == (HANDLE)-2)
++        {
++            static struct esync process_obj;
++            static int process_obj_init;
++            static __thread struct esync thread_obj;
++            static __thread int thread_obj_init;
++
++            if (handle == (HANDLE)-1)
++            {
++                if (!process_obj_init)
++                {
++                    server_enter_uninterrupted_section( &fd_cache_mutex, &sigset );
++                    if (!process_obj_init)
++                    {
++                        SERVER_START_REQ( get_esync_fd )
++                        {
++                            req->handle = wine_server_obj_handle( handle );
++                            if (!(ret = wine_server_call( req )))
++                            {
++                                process_obj.type = reply->type;
++                                process_obj.access = reply->access;
++                                process_obj.fd = receive_fd( &fd_handle );
++                                process_obj.shm = NULL;
++                                process_obj_init = 1;
++                            }
++                        }
++                        SERVER_END_REQ;
++                    }
++                    server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
++                }
++                if (process_obj_init)
++                {
++                    *obj = &process_obj;
++                    return STATUS_SUCCESS;
++                }
++            }
++            else if (handle == (HANDLE)-2)
++            {
++                if (!thread_obj_init)
++                {
++                    server_enter_uninterrupted_section( &fd_cache_mutex, &sigset );
++                    if (!thread_obj_init)
++                    {
++                        SERVER_START_REQ( get_esync_fd )
++                        {
++                            req->handle = wine_server_obj_handle( handle );
++                            if (!(ret = wine_server_call( req )))
++                            {
++                                thread_obj.type = reply->type;
++                                thread_obj.access = reply->access;
++                                thread_obj.fd = receive_fd( &fd_handle );
++                                thread_obj.shm = NULL;
++                                thread_obj_init = 1;
++                            }
++                        }
++                        SERVER_END_REQ;
++                    }
++                    server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
++                }
++                if (thread_obj_init)
++                {
++                    *obj = &thread_obj;
++                    return STATUS_SUCCESS;
++                }
++            }
++        }
+         return STATUS_NOT_IMPLEMENTED;
+     }
+ 
+@@ -316,6 +361,7 @@ static NTSTATUS get_object( HANDLE handle, struct esync **obj )
              {
                  type = reply->type;
                  shm_idx = reply->shm_idx;
@@ -90,7 +268,7 @@ index 02a93f134ad..4a3bd2ca22a 100644
                  fd = receive_fd( &fd_handle );
                  assert( wine_server_ptr_handle(fd_handle) == handle );
              }
-@@ -339,7 +343,7 @@ static NTSTATUS get_object( HANDLE handle, struct esync **obj )
+@@ -339,7 +385,7 @@ static NTSTATUS get_object( HANDLE handle, struct esync **obj )
  
      TRACE("Got fd %d for handle %p.\n", fd, handle);
  
@@ -99,7 +277,7 @@ index 02a93f134ad..4a3bd2ca22a 100644
      return ret;
  }
  
-@@ -399,7 +403,7 @@ static NTSTATUS create_esync( enum esync_type type, HANDLE *handle, ACCESS_MASK
+@@ -399,7 +445,7 @@ static NTSTATUS create_esync( enum esync_type type, HANDLE *handle, ACCESS_MASK
  
      if (!ret || ret == STATUS_OBJECT_NAME_EXISTS)
      {
@@ -108,7 +286,7 @@ index 02a93f134ad..4a3bd2ca22a 100644
          TRACE("-> handle %p, fd %d.\n", *handle, fd);
      }
  
-@@ -439,7 +443,7 @@ static NTSTATUS open_esync( enum esync_type type, HANDLE *handle,
+@@ -439,7 +485,7 @@ static NTSTATUS open_esync( enum esync_type type, HANDLE *handle,
  
      if (!ret)
      {
@@ -117,7 +295,7 @@ index 02a93f134ad..4a3bd2ca22a 100644
  
          TRACE("-> handle %p, fd %d.\n", *handle, fd);
      }
-@@ -474,6 +478,7 @@ NTSTATUS esync_release_semaphore( HANDLE handle, unsigned int count, ULONG *prev
+@@ -474,6 +520,7 @@ NTSTATUS esync_release_semaphore( HANDLE handle, unsigned int count, ULONG *prev
      TRACE("%p, %d, %p.\n", handle, count, prev);
  
      if ((ret = get_object( handle, &obj))) return ret;
@@ -125,7 +303,7 @@ index 02a93f134ad..4a3bd2ca22a 100644
      semaphore = obj->shm;
  
      do
-@@ -603,6 +608,7 @@ NTSTATUS esync_set_event( HANDLE handle )
+@@ -603,6 +650,7 @@ NTSTATUS esync_set_event( HANDLE handle )
      TRACE("%p.\n", handle);
  
      if ((ret = get_object( handle, &obj ))) return ret;
@@ -133,7 +311,7 @@ index 02a93f134ad..4a3bd2ca22a 100644
      event = obj->shm;
  
      if (obj->type == ESYNC_MANUAL_EVENT)
-@@ -646,6 +652,7 @@ NTSTATUS esync_reset_event( HANDLE handle )
+@@ -646,6 +694,7 @@ NTSTATUS esync_reset_event( HANDLE handle )
      TRACE("%p.\n", handle);
  
      if ((ret = get_object( handle, &obj ))) return ret;
@@ -141,15 +319,75 @@ index 02a93f134ad..4a3bd2ca22a 100644
      event = obj->shm;
  
      if (obj->type == ESYNC_MANUAL_EVENT)
-@@ -687,6 +694,7 @@ NTSTATUS esync_pulse_event( HANDLE handle )
+@@ -682,23 +731,58 @@ NTSTATUS esync_pulse_event( HANDLE handle )
+ {
+     uint64_t value = 1;
+     struct esync *obj;
++    struct event *event;
+     NTSTATUS ret;
+ 
      TRACE("%p.\n", handle);
  
      if ((ret = get_object( handle, &obj ))) return ret;
 +    if (!(obj->access & EVENT_MODIFY_STATE)) return STATUS_ACCESS_DENIED;
  
-     /* This isn't really correct; an application could miss the write.
-      * Unfortunately we can't really do much better. Fortunately this is rarely
-@@ -750,6 +758,7 @@ NTSTATUS esync_release_mutex( HANDLE *handle, LONG *prev )
+-    /* This isn't really correct; an application could miss the write.
+-     * Unfortunately we can't really do much better. Fortunately this is rarely
+-     * used (and publicly deprecated). */
+-    if (write( obj->fd, &value, sizeof(value) ) == -1)
+-        return errno_to_status( errno );
++    event = obj->shm;
++
++    if (obj->type == ESYNC_MANUAL_EVENT)
++    {
++        /* Acquire the spinlock. */
++        while (InterlockedCompareExchange( &event->locked, 1, 0 ))
++            small_pause();
+ 
+-    /* Try to give other threads a chance to wake up. Hopefully erring on this
+-     * side is the better thing to do... */
+-    NtYieldExecution();
++        InterlockedExchange( &event->signaled, 1 );
+ 
+-    read( obj->fd, &value, sizeof(value) );
++        if (write( obj->fd, &value, sizeof(value) ) == -1)
++            ERR("write: %s\n", strerror(errno));
++
++        event->locked = 0;
++
++        /* Yield execution to give waiting threads a chance to wake up. */
++        NtYieldExecution();
++
++        while (InterlockedCompareExchange( &event->locked, 1, 0 ))
++            small_pause();
++
++        InterlockedExchange( &event->signaled, 0 );
++        if (read( obj->fd, &value, sizeof(value) ) == -1 && errno != EWOULDBLOCK && errno != EAGAIN)
++        {
++            ERR("read: %s\n", strerror(errno));
++        }
++
++        event->locked = 0;
++    }
++    else
++    {
++        InterlockedExchange( &event->signaled, 1 );
++
++        if (write( obj->fd, &value, sizeof(value) ) == -1)
++            ERR("write: %s\n", strerror(errno));
++
++        NtYieldExecution();
++
++        InterlockedExchange( &event->signaled, 0 );
++        if (read( obj->fd, &value, sizeof(value) ) == -1 && errno != EWOULDBLOCK && errno != EAGAIN)
++        {
++            ERR("read: %s\n", strerror(errno));
++        }
++    }
+ 
+     return STATUS_SUCCESS;
+ }
+@@ -750,6 +834,7 @@ NTSTATUS esync_release_mutex( HANDLE *handle, LONG *prev )
      TRACE("%p, %p.\n", handle, prev);
  
      if ((ret = get_object( handle, &obj ))) return ret;
@@ -157,7 +395,7 @@ index 02a93f134ad..4a3bd2ca22a 100644
      mutex = obj->shm;
  
      /* This is thread-safe, because the only thread that can change the tid to
-@@ -931,7 +940,10 @@ static NTSTATUS __esync_wait_objects( unsigned int count, const HANDLE *handles,
+@@ -931,7 +1016,10 @@ static NTSTATUS __esync_wait_objects( unsigned int count, const HANDLE *handles,
      {
          ret = get_object( handles[i], &objs[i] );
          if (ret == STATUS_SUCCESS)
@@ -168,6 +406,85 @@ index 02a93f134ad..4a3bd2ca22a 100644
          else if (ret == STATUS_NOT_IMPLEMENTED)
              has_server = 1;
          else
+@@ -941,10 +1029,10 @@ static NTSTATUS __esync_wait_objects( unsigned int count, const HANDLE *handles,
+     if (objs[count - 1] && objs[count - 1]->type == ESYNC_QUEUE)
+         msgwait = TRUE;
+ 
+-    if (has_esync && has_server)
+-        FIXME("Can't wait on esync and server objects at the same time!\n");
+-    else if (has_server)
++    if (has_server && !has_esync)
+         return STATUS_NOT_IMPLEMENTED;
++    else if (has_esync && has_server)
++        TRACE("Doing mixed wait (esync + server objects) for %d handles.\n", count);
+ 
+     if (TRACE_ON(esync))
+     {
+@@ -1070,7 +1158,50 @@ static NTSTATUS __esync_wait_objects( unsigned int count, const HANDLE *handles,
+ 
+         while (1)
+         {
+-            ret = do_poll( fds, pollcount, timeout ? &end : NULL );
++            ULONGLONG poll_end = 0;
++            if (has_server)
++            {
++                union select_op select_op;
++                LARGE_INTEGER zero = {0};
++                UINT server_count = 0;
++                int server_indices[MAXIMUM_WAIT_OBJECTS];
++                UINT flags = SELECT_INTERRUPTIBLE;
++
++                if (alertable) flags |= SELECT_ALERTABLE;
++                select_op.wait.op = SELECT_WAIT;
++                for (i = 0; i < count; i++)
++                {
++                    if (!objs[i])
++                    {
++                        server_indices[server_count] = i;
++                        select_op.wait.handles[server_count] = wine_server_obj_handle( handles[i] );
++                        server_count++;
++                    }
++                }
++                if (server_count)
++                {
++                    int res = server_wait( &select_op, offsetof( union select_op, wait.handles[server_count] ),
++                                          flags, &zero );
++                    if (res >= 0 && res < (int)server_count)
++                    {
++                        TRACE("Woken up by server handle %p [%d].\n", handles[server_indices[res]], server_indices[res]);
++                        return server_indices[res];
++                    }
++                    else if (res >= STATUS_ABANDONED_WAIT_0 && res < STATUS_ABANDONED_WAIT_0 + (int)server_count)
++                    {
++                        return STATUS_ABANDONED_WAIT_0 + server_indices[res - STATUS_ABANDONED_WAIT_0];
++                    }
++                    else if (res == STATUS_USER_APC)
++                    {
++                        goto userapc;
++                    }
++                }
++                NtQuerySystemTime( &now );
++                poll_end = now.QuadPart + 50000; /* 5ms step for server check */
++                if (timeout && end < poll_end) poll_end = end;
++            }
++
++            ret = do_poll( fds, pollcount, has_server ? &poll_end : (timeout ? &end : NULL) );
+             if (ret > 0)
+             {
+                 /* We must check this first! The server may set an event that
+@@ -1124,7 +1255,12 @@ static NTSTATUS __esync_wait_objects( unsigned int count, const HANDLE *handles,
+                 NtQuerySystemTime( &now );
+             }
+             else
++            {
++                NtQuerySystemTime( &now );
++                if (has_server && (!timeout || now.QuadPart < end))
++                    continue;
+                 goto err;
++            }
+         }
+     }
+     else
 diff --git a/include/wine/server_protocol.h b/include/wine/server_protocol.h
 index 73adac40946..858bcaeb050 100644
 --- a/include/wine/server_protocol.h
@@ -189,11 +506,175 @@ index 73adac40946..858bcaeb050 100644
 +#define SERVER_PROTOCOL_VERSION 857
  
  #endif /* __WINE_WINE_SERVER_PROTOCOL_H */
+diff --git a/server/debugger.c b/server/debugger.c
+index 0c01ec1c0d3..cf8f134066b 100644
+--- a/server/debugger.c
++++ b/server/debugger.c
+@@ -36,8 +36,12 @@
+ #include "process.h"
+ #include "thread.h"
+ #include "request.h"
++#include "esync.h"
+ 
+ enum debug_event_state { EVENT_QUEUED, EVENT_SENT, EVENT_DELAYED, EVENT_CONTINUED };
++struct debug_obj;
++struct debug_event;
++static struct debug_event *find_event_to_send( struct debug_obj *debug_obj );
+ 
+ /* debug event */
+ struct debug_event
+@@ -71,6 +75,7 @@ struct debug_obj
+     struct object        obj;         /* object header */
+     struct list          event_queue; /* pending events queue */
+     unsigned int         flags;       /* debug flags */
++    int                  esync_fd;    /* esync file descriptor */
+ };
+ 
+ 
+@@ -105,6 +110,7 @@ static const struct object_ops debug_event_ops =
+ 
+ static void debug_obj_dump( struct object *obj, int verbose );
+ static int debug_obj_signaled( struct object *obj, struct wait_queue_entry *entry );
++static int debug_obj_get_esync_fd( struct object *obj, enum esync_type *type );
+ static void debug_obj_destroy( struct object *obj );
+ 
+ static const struct object_ops debug_obj_ops =
+@@ -115,7 +121,7 @@ static const struct object_ops debug_obj_ops =
+     add_queue,                     /* add_queue */
+     remove_queue,                  /* remove_queue */
+     debug_obj_signaled,            /* signaled */
+-    NULL,                          /* get_esync_fd */
++    debug_obj_get_esync_fd,        /* get_esync_fd */
+     no_satisfied,                  /* satisfied */
+     no_signal,                     /* signal */
+     no_get_fd,                     /* get_fd */
+@@ -243,6 +249,8 @@ static void unlink_event( struct debug_obj *debug_obj, struct debug_event *event
+     list_remove( &event->entry );
+     if (event->sender->process->debug_event == event) event->sender->process->debug_event = NULL;
+     release_object( event );
++    if (do_esync() && !find_event_to_send( debug_obj ))
++        esync_clear( debug_obj->esync_fd );
+ }
+ 
+ /* link an event at the end of the queue */
+@@ -332,6 +340,13 @@ static int debug_obj_signaled( struct object *obj, struct wait_queue_entry *entr
+     return find_event_to_send( debug_obj ) != NULL;
+ }
+ 
++static int debug_obj_get_esync_fd( struct object *obj, enum esync_type *type )
++{
++    struct debug_obj *debug_obj = (struct debug_obj *)obj;
++    *type = ESYNC_MANUAL_SERVER;
++    return debug_obj->esync_fd;
++}
++
+ static void debug_obj_destroy( struct object *obj )
+ {
+     struct list *ptr;
+@@ -344,6 +359,8 @@ static void debug_obj_destroy( struct object *obj )
+     /* free all pending events */
+     while ((ptr = list_head( &debug_obj->event_queue )))
+         unlink_event( debug_obj, LIST_ENTRY( ptr, struct debug_event, entry ));
++
++    if (do_esync()) close( debug_obj->esync_fd );
+ }
+ 
+ struct debug_obj *get_debug_obj( struct process *process, obj_handle_t handle, unsigned int access )
+@@ -362,7 +379,10 @@ static struct debug_obj *create_debug_obj( struct object *root, const struct uni
+         if (get_error() != STATUS_OBJECT_NAME_EXISTS)
+         {
+             debug_obj->flags = flags;
++            debug_obj->esync_fd = -1;
+             list_init( &debug_obj->event_queue );
++            if (do_esync())
++                debug_obj->esync_fd = esync_create_fd( 0, 0 );
+         }
+     }
+     return debug_obj;
 diff --git a/server/esync.c b/server/esync.c
-index 62be734bdeb..efaf82d9165 100644
+index 62be734bdeb..656fcb1c821 100644
 --- a/server/esync.c
 +++ b/server/esync.c
-@@ -636,6 +636,7 @@ DECL_HANDLER(get_esync_fd)
+@@ -68,68 +68,45 @@ static long pagesize;
+ #include <alloca.h>
+ #include <errno.h>
+ static int shm_unlink(const char *name) {
+-    size_t namelen;
+     const char *env_tmpdir = getenv("TMPDIR");
+     const char *default_tmpdir = "/data/data/com.windroid.emu/files/usr/tmp/";
+-
++    const char *dir = env_tmpdir ? env_tmpdir : default_tmpdir;
+     char fname[1024];
++    size_t pathlen;
+ 
+-    if (env_tmpdir) {
+-        size_t pathlen = strlen(env_tmpdir);
+-        snprintf(fname, sizeof(fname), "%s%s", env_tmpdir, (env_tmpdir[pathlen - 1] == '/') ? "" : "/");
+-    } else {
+-        snprintf(fname, sizeof(fname), "%s", default_tmpdir);
+-    }
+-
+-    /* Construct the filename.  */
+     while (name[0] == '/') ++name;
+-
+     if (name[0] == '\0') {
+-        /* The name "/" is not supported.  */
+         errno = EINVAL;
+         return -1;
+     }
+ 
+-    strcat(fname, name);
+-
++    pathlen = strlen(dir);
++    snprintf(fname, sizeof(fname), "%s%s%s", dir, (pathlen > 0 && dir[pathlen - 1] == '/') ? "" : "/", name);
+     return unlink(fname);
+ }
+ 
+ static int shm_open(const char *name, int oflag, mode_t mode) {
+-    size_t namelen;
+-    int fd;
+     const char *env_tmpdir = getenv("TMPDIR");
+     const char *default_tmpdir = "/data/data/com.windroid.emu/files/usr/tmp/";
+-
++    const char *dir = env_tmpdir ? env_tmpdir : default_tmpdir;
+     char fname[1024];
++    size_t pathlen;
++    int fd;
+ 
+-    if (env_tmpdir) {
+-        size_t pathlen = strlen(env_tmpdir);
+-        snprintf(fname, sizeof(fname), "%s%s", env_tmpdir, (env_tmpdir[pathlen - 1] == '/') ? "" : "/");
+-    } else {
+-        snprintf(fname, sizeof(fname), "%s", default_tmpdir);
+-    }
+-
+-    /* Construct the filename.  */
+     while (name[0] == '/') ++name;
+-
+     if (name[0] == '\0') {
+-        /* The name "/" is not supported.  */
+         errno = EINVAL;
+         return -1;
+     }
+ 
+-    strcat(fname, name);
++    pathlen = strlen(dir);
++    snprintf(fname, sizeof(fname), "%s%s%s", dir, (pathlen > 0 && dir[pathlen - 1] == '/') ? "" : "/", name);
+ 
+     fd = open(fname, oflag, mode);
+     if (fd != -1) {
+-        /* We got a descriptor.  Now set the FD_CLOEXEC bit.  */
+         int flags = fcntl(fd, F_GETFD, 0);
+         flags |= FD_CLOEXEC;
+-        flags = fcntl(fd, F_SETFD, flags);
+-
+-        if (flags == -1) {
+-            /* Something went wrong.  We cannot return the descriptor.  */
++        if (fcntl(fd, F_SETFD, flags) == -1) {
+             int save_errno = errno;
+             close(fd);
+             fd = -1;
+@@ -636,6 +613,7 @@ DECL_HANDLER(get_esync_fd)
      {
          fd = obj->ops->get_esync_fd( obj, &type );
          reply->type = type;
@@ -201,6 +682,28 @@ index 62be734bdeb..efaf82d9165 100644
          if (obj->ops == &esync_ops)
          {
              struct esync *esync = (struct esync *)obj;
+diff --git a/server/named_pipe.c b/server/named_pipe.c
+index fa74ff8244a..eb7cca73a71 100644
+--- a/server/named_pipe.c
++++ b/server/named_pipe.c
+@@ -293,7 +293,7 @@ static const struct object_ops named_pipe_device_file_ops =
+     add_queue,                               /* add_queue */
+     remove_queue,                            /* remove_queue */
+     default_fd_signaled,                     /* signaled */
+-    NULL,                                    /* get_esync_fd */
++    default_fd_get_esync_fd,                 /* get_esync_fd */
+     no_satisfied,                            /* satisfied */
+     no_signal,                               /* signal */
+     named_pipe_device_file_get_fd,           /* get_fd */
+@@ -344,7 +344,7 @@ static const struct object_ops named_pipe_dir_ops =
+     add_queue,                               /* add_queue */
+     remove_queue,                            /* remove_queue */
+     default_fd_signaled,                     /* signaled */
+-    NULL,                                    /* get_esync_fd */
++    default_fd_get_esync_fd,                 /* get_esync_fd */
+     no_satisfied,                            /* satisfied */
+     no_signal,                               /* signal */
+     named_pipe_dir_get_fd,                   /* get_fd */
 diff --git a/server/protocol.def b/server/protocol.def
 index ffefbd20e1e..4506f75ec77 100644
 --- a/server/protocol.def
@@ -239,3 +742,45 @@ index ce23329a99b..de66ae83a18 100644
  }
  
  static void dump_esync_msgwait_request( const struct esync_msgwait_request *req )
+diff --git a/server/sock.c b/server/sock.c
+index 2bb027a563c..af112b21e4f 100644
+--- a/server/sock.c
++++ b/server/sock.c
+@@ -471,7 +471,7 @@ static const struct object_ops sock_ops =
+     add_queue,                    /* add_queue */
+     remove_queue,                 /* remove_queue */
+     default_fd_signaled,          /* signaled */
+-    NULL,                         /* get_esync_fd */
++    default_fd_get_esync_fd,      /* get_esync_fd */
+     no_satisfied,                 /* satisfied */
+     no_signal,                    /* signal */
+     sock_get_fd,                  /* get_fd */
+diff --git a/server/timer.c b/server/timer.c
+index b4ab6113211..cc46ebcc38b 100644
+--- a/server/timer.c
++++ b/server/timer.c
+@@ -177,6 +177,9 @@ static int cancel_timer( struct timer *timer )
+         release_object( timer->thread );
+         timer->thread = NULL;
+     }
++    if (do_esync())
++        esync_clear( timer->esync_fd );
++    timer->signaled = 0;
+     return signaled;
+ }
+ 
+@@ -188,11 +191,10 @@ static int set_timer( struct timer *timer, timeout_t expire, unsigned int period
+     if (timer->manual)
+     {
+         period = 0;  /* period doesn't make any sense for a manual timer */
+-        timer->signaled = 0;
+-
+-        if (do_esync())
+-            esync_clear( timer->esync_fd );
+     }
++    timer->signaled = 0;
++    if (do_esync())
++        esync_clear( timer->esync_fd );
+     timer->when     = (expire <= 0) ? expire - monotonic_time : max( expire, current_time );
+     timer->period   = period;
+     timer->callback = callback;
