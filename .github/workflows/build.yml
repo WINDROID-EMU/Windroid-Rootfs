@@ -27,7 +27,7 @@ jobs:
         sudo rm -f archlinux-bootstrap-x86_64.tar.zst
         sudo mv root.x86_64 /mnt/arch
 
-        sudo arch-chroot /mnt/arch bash -c "pacman-key --init && pacman-key --populate && sed -i "s/#Server/Server/g" /etc/pacman.d/mirrorlist && sed -i "s/CheckSpace/#CheckSpace/g" /etc/pacman.conf && pacman -Syu --noconfirm base base-devel git cmake meson ninja bison flex python-pip wget python-mako python-pyyaml unzip 7zip glslang glib2-devel python-docutils xmlto fop libxslt python-docutils"
+        sudo arch-chroot /mnt/arch bash -c "pacman-key --init && pacman-key --populate && sed -i \"s/#Server/Server/g\" /etc/pacman.d/mirrorlist && sed -i \"s/CheckSpace/#CheckSpace/g\" /etc/pacman.conf && pacman -Syu --noconfirm base base-devel git cmake meson ninja bison flex python-pip wget python-mako python-pyyaml unzip 7zip glslang glib2-devel python-docutils xmlto fop libxslt python-docutils dwarfs"
 
     - name: "Checkout Repository"
       uses: actions/checkout@v4
@@ -63,9 +63,10 @@ jobs:
       run: |
         sudo arch-chroot /mnt/arch bash -c "cd /Windroid-RootFS-Generator && ./build-all.sh x86_64 --ci && cd logs && 7z a /Windroid-RootFS-$(git rev-parse --short HEAD)-x86_64-Logs.zip"
 
-    - name: "Create RootFS File (x86_64)"
+    - name: "Create RootFS Files (x86_64)"
       run: |
         sudo arch-chroot /mnt/arch bash -c "cd /Windroid-RootFS-Generator && ./create-rootfs-rat.sh x86_64 && mv Windroid-RootFS-\($(git rev-parse --short HEAD)\)-x86_64.rat /Windroid-RootFS-$(git rev-parse --short HEAD)-x86_64.rat"
+        sudo arch-chroot /mnt/arch bash -c "cd /Windroid-RootFS-Generator && ./create-rootfs-dwarfs.sh x86_64 && mv Windroid-RootFS-\($(git rev-parse --short HEAD)\)-x86_64.dwarfs /Windroid-RootFS-$(git rev-parse --short HEAD)-x86_64.dwarfs"
 
     - name: "Clean (x86_64) RootFS"
       run: |
@@ -75,9 +76,10 @@ jobs:
       run: |
         sudo arch-chroot /mnt/arch bash -c "cd /Windroid-RootFS-Generator && ./build-all.sh aarch64 --ci && cd logs && 7z a /Windroid-RootFS-$(git rev-parse --short HEAD)-aarch64-Logs.zip"
 
-    - name: "Create RootFS File (aarch64)"
+    - name: "Create RootFS Files (aarch64)"
       run: |
         sudo arch-chroot /mnt/arch bash -c "cd /Windroid-RootFS-Generator && ./create-rootfs-rat.sh aarch64 && mv Windroid-RootFS-\($(git rev-parse --short HEAD)\)-aarch64.rat /Windroid-RootFS-$(git rev-parse --short HEAD)-aarch64.rat"
+        sudo arch-chroot /mnt/arch bash -c "cd /Windroid-RootFS-Generator && ./create-rootfs-dwarfs.sh aarch64 && mv Windroid-RootFS-\($(git rev-parse --short HEAD)\)-aarch64.dwarfs /Windroid-RootFS-$(git rev-parse --short HEAD)-aarch64.dwarfs"
 
     - name: "Save Rat Packages"
       run: |
@@ -95,4 +97,5 @@ jobs:
         prerelease: true
         files: |
           /mnt/arch/*.rat
+          /mnt/arch/*.dwarfs
           /mnt/arch/*.zip
