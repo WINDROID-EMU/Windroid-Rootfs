@@ -27,7 +27,20 @@ jobs:
         sudo rm -f archlinux-bootstrap-x86_64.tar.zst
         sudo mv root.x86_64 /mnt/arch
 
-        sudo arch-chroot /mnt/arch bash -c "pacman-key --init && pacman-key --populate && sed -i \"s/#Server/Server/g\" /etc/pacman.d/mirrorlist && sed -i \"s/CheckSpace/#CheckSpace/g\" /etc/pacman.conf && pacman -Syu --noconfirm base base-devel git cmake meson ninja bison flex python-pip wget python-mako python-pyyaml unzip 7zip glslang glib2-devel python-docutils xmlto fop libxslt python-docutils dwarfs"
+        sudo arch-chroot /mnt/arch bash -c "pacman-key --init && pacman-key --populate && sed -i \"s/#Server/Server/g\" /etc/pacman.d/mirrorlist && sed -i \"s/CheckSpace/#CheckSpace/g\" /etc/pacman.conf && pacman -Syu --noconfirm base base-devel git cmake meson ninja bison flex python-pip wget python-mako python-pyyaml unzip 7zip glslang glib2-devel python-docutils xmlto fop libxslt python-docutils"
+
+    - name: "Install DwarFS tools (mkdwarfs + dwarfsextract)"
+      run: |
+        DWARFS_VERSION=$(curl -s https://api.github.com/repos/mhx/dwarfs/releases/latest | grep tag_name | cut -d '"' -f 4 | sed 's/v//')
+        echo "Installing DwarFS $DWARFS_VERSION"
+        curl -L "https://github.com/mhx/dwarfs/releases/download/v${DWARFS_VERSION}/dwarfs-universal-${DWARFS_VERSION}-Linux-x86_64" -o /tmp/dwarfs-universal
+        sudo install -m 755 /tmp/dwarfs-universal /usr/local/bin/dwarfs-universal
+        sudo ln -sf /usr/local/bin/dwarfs-universal /usr/local/bin/mkdwarfs
+        sudo ln -sf /usr/local/bin/dwarfs-universal /usr/local/bin/dwarfsextract
+        sudo install -m 755 /tmp/dwarfs-universal /mnt/arch/usr/local/bin/dwarfs-universal
+        sudo ln -sf /usr/local/bin/dwarfs-universal /mnt/arch/usr/local/bin/mkdwarfs
+        sudo ln -sf /usr/local/bin/dwarfs-universal /mnt/arch/usr/local/bin/dwarfsextract
+        echo "DwarFS installed: $(mkdwarfs --version 2>&1 | head -1)"
 
     - name: "Checkout Repository"
       uses: actions/checkout@v4
