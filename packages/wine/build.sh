@@ -19,6 +19,7 @@ CONFIGURE_ARGS="--enable-archs=i386,x86_64 \
 				--disable-winemenubuilder \
 				--disable-win16 \
 				--disable-tests \
+				--enable-wineandroid-drv \
 				--with-x \
 				--x-libraries=$PREFIX/lib \
 				--x-includes=$PREFIX/include \
