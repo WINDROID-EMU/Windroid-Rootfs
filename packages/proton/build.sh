@@ -19,19 +19,18 @@ CONFIGURE_ARGS="--enable-archs=i386,x86_64 \
 				--disable-winemenubuilder \
 				--disable-win16 \
 				--disable-tests \
-				--with-x \
-				--x-libraries=$PREFIX/lib \
-				--x-includes=$PREFIX/include \
+				--enable-wineandroid-drv \
+				--without-x \
+				--without-xinput \
+				--without-xinput2 \
+				--without-xshm \
+				--without-xxf86vm \
 				--with-pulse \
 				--with-gstreamer \
 				--with-opengl \
 				--with-gnutls \
 				--with-mingw=gcc \
-				--with-xinput \
-				--with-xinput2 \
 				--enable-nls \
-				--without-xshm \
-				--without-xxf86vm \
 				--without-osmesa \
 				--without-usb \
 				--without-sdl \
@@ -48,4 +47,4 @@ CONFIGURE_ARGS="--enable-archs=i386,x86_64 \
 				--without-udev \
 				--without-capi"
 
-DEPENDENCIES="libX11 libXext libXcomposite libXrender libXcursor libXrandr libXxf86vm libXinerama libXfixes libXi Vulkan-Headers Vulkan-Loader libglvnd pulseaudio freetype libgnutls gstreamer gst-plugins-base gst-plugins-ugly gst-plugins-good gst-plugins-bad cabextract"
+DEPENDENCIES="Vulkan-Headers Vulkan-Loader libglvnd pulseaudio freetype libgnutls gstreamer gst-plugins-base gst-plugins-ugly gst-plugins-good gst-plugins-bad cabextract"

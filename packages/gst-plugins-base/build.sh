@@ -1,6 +1,6 @@
 PKG_VER=1.29.2
 SRC_URL=https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-$PKG_VER.tar.xz
-MESON_ARGS="-Dintrospection=disabled -Dtests=disabled -Dexamples=disabled -Dpango=disabled "
+MESON_ARGS="-Dintrospection=disabled -Dtests=disabled -Dexamples=disabled -Dpango=disabled -Dx11=disabled "
 MESON_ARGS+="-Dtools=disabled -Dglib-asserts=disabled -Dglib-checks=disabled"
 LDFLAGS="-L$PREFIX/lib -landroid-shmem -Wl,-rpath=$PREFIX/lib"
-DEPENDENCIES="gstreamer glib android-shmem libogg opus libvorbis libX11 libxcb libXext libXi zlib"
+DEPENDENCIES="gstreamer glib android-shmem libogg opus libvorbis zlib"
