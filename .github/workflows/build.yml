@@ -39,12 +39,16 @@ jobs:
         sudo cp -rf $PWD /mnt/arch/Windroid-RootFS-Generator
 
     - name: "Download Latest Release Rat Packages"
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        LATEST_TAG=$(curl -s https://api.github.com/repos/WINDROID-EMU/Windroid-Rootfs/releases | grep tag_name -m 1 | cut -d ":" -f 2 | sed "s/\"//g" | sed "s/,//g" | sed "s/ //g")
-        if [ -n "$LATEST_TAG" ]; then
-          curl -LO# https://github.com/WINDROID-EMU/Windroid-Rootfs/releases/download/$LATEST_TAG/Windroid-Packages.zip || true
-          sudo unzip -o Windroid-Packages.zip -d /mnt/arch/Windroid-RootFS-Generator/built-pkgs || true
-          rm -f Windroid-Packages.zip
+        LATEST_TAG=$(gh api repos/WINDROID-EMU/Windroid-Rootfs/releases --jq '.[0].tag_name' 2>/dev/null || curl -s https://api.github.com/repos/WINDROID-EMU/Windroid-Rootfs/releases | grep tag_name -m 1 | cut -d ":" -f 2 | sed "s/\"//g" | sed "s/,//g" | sed "s/ //g")
+        if [ -n "$LATEST_TAG" ] && [ "$LATEST_TAG" != "null" ]; then
+          gh release download "$LATEST_TAG" -R WINDROID-EMU/Windroid-Rootfs -p "Windroid-Packages.zip" 2>/dev/null || curl -LO# https://github.com/WINDROID-EMU/Windroid-Rootfs/releases/download/$LATEST_TAG/Windroid-Packages.zip || true
+          if [ -f Windroid-Packages.zip ]; then
+            sudo unzip -o Windroid-Packages.zip -d /mnt/arch/Windroid-RootFS-Generator/built-pkgs || true
+            rm -f Windroid-Packages.zip
+          fi
         else
           echo "No previous releases found, performing clean build"
         fi
@@ -88,11 +92,12 @@ jobs:
         echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
     - name: "Create Release"
-      uses: softprops/action-gh-release@v1
-      with:
-        name: "Windroid RootFS (${{ env.SHORT_SHA }})"
-        tag_name: ${{ env.SHORT_SHA }}
-        prerelease: true
-        files: |
-          /mnt/arch/*.rat
-          /mnt/arch/*.zip
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release create "${{ env.SHORT_SHA }}" \
+          /mnt/arch/*.rat \
+          /mnt/arch/*.zip \
+          --title "Windroid RootFS (${{ env.SHORT_SHA }})" \
+          --prerelease \
+          --clobber
