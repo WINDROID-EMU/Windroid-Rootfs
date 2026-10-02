@@ -95,9 +95,17 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        gh release create "${{ env.SHORT_SHA }}" \
+        sudo chmod 644 /mnt/arch/*.rat /mnt/arch/*.zip 2>/dev/null || true
+        if ! gh release view "${{ env.SHORT_SHA }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+          gh release create "${{ env.SHORT_SHA }}" \
+            --repo "${{ github.repository }}" \
+            --title "Windroid RootFS (${{ env.SHORT_SHA }})" \
+            --notes "Windroid RootFS automated build (${{ env.SHORT_SHA }})" \
+            --target "${{ github.sha }}" \
+            --prerelease
+        fi
+        gh release upload "${{ env.SHORT_SHA }}" \
+          --repo "${{ github.repository }}" \
           /mnt/arch/*.rat \
           /mnt/arch/*.zip \
-          --title "Windroid RootFS (${{ env.SHORT_SHA }})" \
-          --prerelease \
           --clobber
