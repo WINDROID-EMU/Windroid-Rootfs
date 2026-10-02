@@ -10,13 +10,14 @@ curl -LO# "https://dl.winehq.org/wine/wine-mono/$MONO_VERSION/wine-mono-$MONO_VE
 curl -LO# "https://dl.winehq.org/wine/wine-gecko/$GECKO_VERSION/wine-gecko-$GECKO_VERSION-x86_64.tar.xz"
 curl -LO# "https://dl.winehq.org/wine/wine-gecko/$GECKO_VERSION/wine-gecko-$GECKO_VERSION-x86.tar.xz"
 
-mkdir -p ../destdir-pkg/$PREFIX
-mkdir -p ../destdir-pkg/$PREFIX/../wine/share/{mono,gecko}
+WINE_DIR="../destdir-pkg$(realpath -m "$PREFIX/../wine")"
+mkdir -p "$WINE_DIR/share/wine/mono"
+mkdir -p "$WINE_DIR/share/wine/gecko"
 
-tar -xf "wine-mono-$MONO_VERSION-x86.tar.xz" -C ../destdir-pkg/$PREFIX/../wine/share/wine/mono
-tar -xf "wine-gecko-$GECKO_VERSION-x86.tar.xz" -C ../destdir-pkg/$PREFIX/../wine/share/wine/gecko
-tar -xf "wine-gecko-$GECKO_VERSION-x86_64.tar.xz" -C ../destdir-pkg/$PREFIX/../wine/share/wine/gecko
+tar -xf "wine-mono-$MONO_VERSION-x86.tar.xz" -C "$WINE_DIR/share/wine/mono"
+tar -xf "wine-gecko-$GECKO_VERSION-x86.tar.xz" -C "$WINE_DIR/share/wine/gecko"
+tar -xf "wine-gecko-$GECKO_VERSION-x86_64.tar.xz" -C "$WINE_DIR/share/wine/gecko"
 
-rm -rf ../destdir-pkg/$PREFIX
+rm -rf "../destdir-pkg/$PREFIX"
 
 rm -f "wine-mono-$MONO_VERSION-x86.tar.xz" "wine-gecko-$GECKO_VERSION-x86.tar.xz" "wine-gecko-$GECKO_VERSION-x86_64.tar.xz"
