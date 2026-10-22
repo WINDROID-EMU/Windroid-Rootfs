@@ -31,7 +31,9 @@ if [ ! -d "$INIT_DIR/built-pkgs" ]; then
 fi
 
 export ROOTFS_PKGS=$(find "$INIT_DIR/built-pkgs" -name "*$ARCH*.rat" | sort)
-export WINE_PKG=$(find "$INIT_DIR/built-pkgs" -name "*wine*.rat")
+# Wine and Proton are built only for x86_64 (BLACKLIST_ARCH=aarch64) and run through Box64 on aarch64,
+# so they never match "*$ARCH*.rat" on aarch64. Collect them regardless of the arch in the file name.
+export WINE_PKGS=$(find "$INIT_DIR/built-pkgs" \( -name "*wine*.rat" -o -name "proton-*.rat" \) | sort)
 export WINE_UTILS_PKG="$INIT_DIR/Wine-Utils-($GIT_SHORT_SHA)-any.rat"
 
 if [ ! -f "$WINE_UTILS_PKG" ]; then
@@ -41,11 +43,15 @@ fi
 
 ROOTFS_PKGS+=" $WINE_UTILS_PKG"
 
-if [ -f "$WINE_PKG" ]; then
-  ROOTFS_PKGS+=" $WINE_PKG"
-else
+if [ -z "$WINE_PKGS" ]; then
   echo "Warning, Wine Not Found."
 fi
+
+for wp in $WINE_PKGS; do
+  if ! echo "$ROOTFS_PKGS" | tr ' ' '\n' | grep -qxF "$wp"; then
+    ROOTFS_PKGS+=" $wp"
+  fi
+done
 
 resolvePath()
 {
