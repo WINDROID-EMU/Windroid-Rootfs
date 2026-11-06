@@ -30,28 +30,32 @@ if [ ! -d "$INIT_DIR/built-pkgs" ]; then
   exit 0
 fi
 
-export ROOTFS_PKGS=$(find "$INIT_DIR/built-pkgs" -name "*$ARCH*.rat" | sort)
-# Wine and Proton are built only for x86_64 (BLACKLIST_ARCH=aarch64) and run through Box64 on aarch64,
-# so they never match "*$ARCH*.rat" on aarch64. Collect them regardless of the arch in the file name.
-export WINE_PKGS=$(find "$INIT_DIR/built-pkgs" \( -name "*wine*.rat" -o -name "proton-*.rat" \) | sort)
+declare -a PKG_LIST=()
+
+while IFS= read -r f; do
+  [ -n "$f" ] && PKG_LIST+=("$f")
+done < <(find "$INIT_DIR/built-pkgs" -name "*$ARCH*.rat" | sort)
+
 export WINE_UTILS_PKG="$INIT_DIR/Wine-Utils-($GIT_SHORT_SHA)-any.rat"
 
 if [ ! -f "$WINE_UTILS_PKG" ]; then
-  $INIT_DIR/tools/download-external-dependencies.sh
-  $INIT_DIR/tools/create-rat-pkg.sh "Wine-Utils" "Wine Utils" "" "any" "($GIT_SHORT_SHA)" "wine-utils" "$INIT_DIR/wine-utils" "$INIT_DIR"
+  "$INIT_DIR/tools/download-external-dependencies.sh"
+  "$INIT_DIR/tools/create-rat-pkg.sh" "Wine-Utils" "Wine Utils" "" "any" "($GIT_SHORT_SHA)" "wine-utils" "$INIT_DIR/wine-utils" "$INIT_DIR"
 fi
 
-ROOTFS_PKGS+=" $WINE_UTILS_PKG"
+[ -f "$WINE_UTILS_PKG" ] && PKG_LIST+=("$WINE_UTILS_PKG")
 
-if [ -z "$WINE_PKGS" ]; then
+found_wine=0
+while IFS= read -r wp; do
+  if [ -n "$wp" ]; then
+    found_wine=1
+    PKG_LIST+=("$wp")
+  fi
+done < <(find "$INIT_DIR/built-pkgs" \( -name "*wine*.rat" -o -name "proton-*.rat" \) | sort)
+
+if [ "$found_wine" -eq 0 ]; then
   echo "Warning, Wine Not Found."
 fi
-
-for wp in $WINE_PKGS; do
-  if ! echo "$ROOTFS_PKGS" | tr ' ' '\n' | grep -qxF "$wp"; then
-    ROOTFS_PKGS+=" $wp"
-  fi
-done
 
 resolvePath()
 {
@@ -76,15 +80,16 @@ cd /tmp/$RAND_VAL
 mkdir -p "vulkanDrivers"
 mkdir -p "adrenoTools"
 mkdir -p "box64"
+mkdir -p "fexcore"
 mkdir -p "wine"
 
 touch new_makeSymlinks.sh
 
-for i in $ROOTFS_PKGS; do
+for i in "${PKG_LIST[@]}"; do
   resolvedPath=$(resolvePath "$i")
 
-  if [ -n "$resolvedPath" ] && [ ! -f "$INIT_DIR/built-pkgs/$(basename $i | sed "s/.rat/.isOptional/g")" ]; then
-    echo "Extracting '$(basename $resolvedPath)'..."
+  if [ -n "$resolvedPath" ] && [ ! -f "$INIT_DIR/built-pkgs/$(basename "$i" | sed "s/.rat/.isOptional/g")" ]; then
+    echo "Extracting '$(basename "$resolvedPath")'..."
 
     tar -xf "$resolvedPath" pkg-header
 
@@ -93,6 +98,9 @@ for i in $ROOTFS_PKGS; do
     if [ "$packageCategory" == "VulkanDriver" ]; then
       cp -f "$resolvedPath" "vulkanDrivers"
     elif [ "$packageCategory" == "Box64" ]; then
+      cp -f "$resolvedPath" "box64"
+    elif [ "$packageCategory" == "FEXCore" ]; then
+      cp -f "$resolvedPath" "fexcore"
       cp -f "$resolvedPath" "box64"
     elif [ "$packageCategory" == "Wine" ]; then
       cp -f "$resolvedPath" "wine"
@@ -111,7 +119,7 @@ done
 
 mv new_makeSymlinks.sh makeSymlinks.sh
 
-$INIT_DIR/tools/create-rat-pkg.sh "Windroid-RootFS" "Windroid RootFS $ROOTFS_VERSION" "" "$ARCH" "($GIT_SHORT_SHA)" "rootfs" "$PWD" "$INIT_DIR"
+"$INIT_DIR/tools/create-rat-pkg.sh" "Windroid-RootFS" "Windroid RootFS $ROOTFS_VERSION" "" "$ARCH" "($GIT_SHORT_SHA)" "rootfs" "$PWD" "$INIT_DIR"
 
 cd "$INIT_DIR"
 

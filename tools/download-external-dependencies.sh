@@ -111,8 +111,8 @@ wined3dDownload() {
 
 		cd "WineD3D"
 
-		curl -# -L --connect-timeout 30 --max-time 600 --retry 5 --retry-delay 10 -O "https://raw.githubusercontent.com/WINDROID-EMU/Windroid-WineD3D/main/WineD3DForWindows_$1.zip"
-		curl -# -L --connect-timeout 30 --max-time 600 --retry 5 --retry-delay 10 -O "https://raw.githubusercontent.com/WINDROID-EMU/Windroid-WineD3D/main/WineD3DForWindows_$1-x86_64.zip"
+		curl -# -fL --connect-timeout 5 --max-time 15 -O "https://raw.githubusercontent.com/WINDROID-EMU/Windroid-WineD3D/main/WineD3DForWindows_$1.zip" || true
+		curl -# -fL --connect-timeout 5 --max-time 15 -O "https://raw.githubusercontent.com/WINDROID-EMU/Windroid-WineD3D/main/WineD3DForWindows_$1-x86_64.zip" || true
 
 		if [ $? != 0 ]; then
 			echo "Error on Downloading WineD3D-($1)."

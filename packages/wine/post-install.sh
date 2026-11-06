@@ -5,18 +5,32 @@ MONO_VERSION=${MONO_VERSION:1:-1}
 GECKO_VERSION=$(grep -R "#define GECKO_VERSION" "../dlls/appwiz.cpl/addons.c" | cut -d " " -f 3)
 GECKO_VERSION=${GECKO_VERSION:1:-1}
 
+CACHE_DIR="$INIT_DIR/cache"
+mkdir -p "$CACHE_DIR"
+
 # Download Wine Gecko and Mono and Package Together with Wine
-curl -LO# "https://dl.winehq.org/wine/wine-mono/$MONO_VERSION/wine-mono-$MONO_VERSION-x86.tar.xz"
-curl -LO# "https://dl.winehq.org/wine/wine-gecko/$GECKO_VERSION/wine-gecko-$GECKO_VERSION-x86_64.tar.xz"
-curl -LO# "https://dl.winehq.org/wine/wine-gecko/$GECKO_VERSION/wine-gecko-$GECKO_VERSION-x86.tar.xz"
+download_if_needed() {
+    local file="$1"
+    local url="$2"
+    if [ -f "$CACHE_DIR/$file" ]; then
+        cp "$CACHE_DIR/$file" .
+    else
+        curl -f -LO# "$url"
+        cp "$file" "$CACHE_DIR/"
+    fi
+}
 
-mkdir -p ../destdir-pkg/$PREFIX
-mkdir -p ../destdir-pkg/$PREFIX/../wine/share/{mono,gecko}
+download_if_needed "wine-mono-$MONO_VERSION-x86.tar.xz" "https://dl.winehq.org/wine/wine-mono/$MONO_VERSION/wine-mono-$MONO_VERSION-x86.tar.xz"
+download_if_needed "wine-gecko-$GECKO_VERSION-x86_64.tar.xz" "https://dl.winehq.org/wine/wine-gecko/$GECKO_VERSION/wine-gecko-$GECKO_VERSION-x86_64.tar.xz"
+download_if_needed "wine-gecko-$GECKO_VERSION-x86.tar.xz" "https://dl.winehq.org/wine/wine-gecko/$GECKO_VERSION/wine-gecko-$GECKO_VERSION-x86.tar.xz"
 
-tar -xf "wine-mono-$MONO_VERSION-x86.tar.xz" -C ../destdir-pkg/$PREFIX/../wine/share/wine/mono
-tar -xf "wine-gecko-$GECKO_VERSION-x86.tar.xz" -C ../destdir-pkg/$PREFIX/../wine/share/wine/gecko
-tar -xf "wine-gecko-$GECKO_VERSION-x86_64.tar.xz" -C ../destdir-pkg/$PREFIX/../wine/share/wine/gecko
+mkdir -p "../destdir-pkg/$PREFIX"
+mkdir -p "../destdir-pkg/$PREFIX/../wine/share/wine/mono"
+mkdir -p "../destdir-pkg/$PREFIX/../wine/share/wine/gecko"
 
-rm -rf ../destdir-pkg/$PREFIX
+tar -xf "wine-mono-$MONO_VERSION-x86.tar.xz" -C "../destdir-pkg/$PREFIX/../wine/share/wine/mono"
+tar -xf "wine-gecko-$GECKO_VERSION-x86.tar.xz" -C "../destdir-pkg/$PREFIX/../wine/share/wine/gecko"
+tar -xf "wine-gecko-$GECKO_VERSION-x86_64.tar.xz" -C "../destdir-pkg/$PREFIX/../wine/share/wine/gecko"
 
+rm -rf "../destdir-pkg/$PREFIX"
 rm -f "wine-mono-$MONO_VERSION-x86.tar.xz" "wine-gecko-$GECKO_VERSION-x86.tar.xz" "wine-gecko-$GECKO_VERSION-x86_64.tar.xz"

@@ -6,26 +6,27 @@ showHelp()
 }
 
 symlinkToSh() {
-  for folder in $(find $1 -type d); do
+  while IFS= read -r folder; do
     if [ -d "$folder" ]; then
       cd "$folder"
 
-      for file in $(find $PWD -type l); do
-        target=$(readlink $file)
+      while IFS= read -r file; do
+        [ -z "$file" ] && continue
+        target=$(readlink "$file")
 
         if [ "$target" != "nul" ]; then
           rm "$file"
 
-          target=$(echo $target | sed "s@$WORKDIR@$APP_ROOT_DIR@g")
-          file=$(echo $file | sed "s@$WORKDIR@$APP_ROOT_DIR@g")
+          target=$(echo "$target" | sed "s@$WORKDIR@$APP_ROOT_DIR@g")
+          file=$(echo "$file" | sed "s@$WORKDIR@$APP_ROOT_DIR@g")
 
-          echo "ln -sf $target $file" >> $WORKDIR/makeSymlinks.sh
+          echo "ln -sf $target $file" >> "$WORKDIR/makeSymlinks.sh"
         fi
-      done
+      done < <(find "$PWD" -type l)
 
-      cd $OLDPWD
+      cd "$OLDPWD"
     fi
-  done
+  done < <(find "$1" -type d)
 }
 
 if [ $# -lt 8 ]; then
@@ -56,7 +57,7 @@ if [ -d "$DESTDIR_PKG/data/" ]; then
 	WORKDIR="$DESTDIR_PKG/data/data/com.windroid.emu/"
 fi
 
-cd $WORKDIR
+cd "$WORKDIR"
 
 echo "name=$PACKAGE_PRETTY_NAME" > pkg-header
 echo "category=$PACKAGE_CATEGORY" >> pkg-header

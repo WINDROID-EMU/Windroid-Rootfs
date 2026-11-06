@@ -36,7 +36,9 @@ setupBuildEnv()
 		echo ""
 	fi
 
-	export PATH=$INIT_PATH:$INIT_DIR/cache/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$INIT_DIR/cache/mingw/bin
+	export PATH=/home/anthero/.local/bin:$INIT_PATH:$INIT_DIR/cache/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:$INIT_DIR/cache/mingw/bin
+	export BISON_PKGDATADIR=/home/anthero/.local/usr/share/bison
+	export M4=/home/anthero/.local/bin/m4
 	export ANDROID_SDK="$1"
 	export CC=$ARCH-linux-android$ANDROID_SDK-clang
 	export CXX=$CC++
@@ -49,15 +51,16 @@ setupBuildEnv()
 
 applyPatches()
 {
-	for patch in $(find $INIT_DIR/packages/$package -name "*.patch" | sort); do
-		echo "  - Applying '$(basename $patch)'..."
+	while IFS= read -r patch; do
+		[ -z "$patch" ] && continue
+		echo "  - Applying '$(basename "$patch")'..."
 		patch -p1 < "$patch" -ts
 
 		if [ $? != 0 ]; then
-			echo "  -- Error on Applying Patch '$(basename $patch)' on '$package'"
+			echo "  -- Error on Applying Patch '$(basename "$patch")' on '$package'"
 			exit 1
 		fi
-	done
+	done < <(find "$INIT_DIR/packages/$package" -name "*.patch" | sort)
 
 	echo ""
 
@@ -100,16 +103,16 @@ gitDownload()
 		echo "-- Package '$package' already downloaded."
 	else
 		echo "-- Git Cloning '$package'..."
-		git clone --no-checkout $GIT_URL "$INIT_DIR/cache/$package" &> /dev/zero
+		git clone --no-checkout "$GIT_URL" "$INIT_DIR/cache/$package"
 	fi
 
-	git clone "$INIT_DIR/cache/$package" &> /dev/zero
+	git clone "$INIT_DIR/cache/$package" $package
 
 	cd $package
 
-	git reset --hard $GIT_COMMIT &> /dev/zero
-	git checkout $GIT_COMMIT . &> /dev/zero
-	git submodule update --init --recursive &> /dev/zero
+	git reset --hard $GIT_COMMIT
+	git checkout $GIT_COMMIT .
+	git submodule update --init --recursive
 
 	cd ..
 }
@@ -174,6 +177,8 @@ setupPackage()
 
 	echo "export CFLAGS=\"$CFLAGS\" LIBS=\"$LIBS\" CPPFLAGS=\"$CPPFLAGS\" LDFLAGS=\"-Wl,-rpath="$PREFIX_DIR/lib" $LDFLAGS\"" > build.sh
 	echo "export DESTDIR=\"$INIT_DIR/workdir/$package/destdir-pkg\"" >> build.sh
+	echo "export PATH=\"/home/anthero/.local/bin:\$PATH\"" >> build.sh
+	echo "export BISON_PKGDATADIR=\"/home/anthero/.local/usr/share/bison\" M4=\"/home/anthero/.local/bin/m4\"" >> build.sh
 
 	if [ -n "$OVERRIDE_PREFIX" ]; then
 		PREFIX_DIR=$OVERRIDE_PREFIX
@@ -187,24 +192,23 @@ setupPackage()
 
 	if [ -f "configure" ] && [ -n "$CONFIGURE_ARGS" ]; then
 		if [ -n "$HOST_BUILD_CONFIGURE_ARGS" ]; then
-			echo "mkdir -p $HOST_BUILD_FOLDER" >> build.sh
-			echo "cd $HOST_BUILD_FOLDER" >> build.sh
-			echo "env -i bash -l -c \"../configure $HOST_BUILD_CONFIGURE_ARGS\"" >> build.sh
-			echo "$HOST_BUILD_MAKE" >> build.sh
-			echo 'cd $OLDPWD' >> build.sh
+			echo "mkdir -p \"$HOST_BUILD_FOLDER\"" >> build.sh
+			echo "cd \"$HOST_BUILD_FOLDER\"" >> build.sh
+			echo "( export PATH=\"/home/anthero/.local/bin:\$PATH\"; export PKG_CONFIG_PATH=\"/home/anthero/.local/lib/pkgconfig\"; export BISON_PKGDATADIR=\"/home/anthero/.local/usr/share/bison\"; export M4=\"/home/anthero/.local/bin/m4\"; unset CC CXX CFLAGS CPPFLAGS LDFLAGS LIBS; ../configure $HOST_BUILD_CONFIGURE_ARGS && $HOST_BUILD_MAKE )" >> build.sh
+			echo 'cd "$OLDPWD"' >> build.sh
 		fi
 
 		echo "../configure --libdir=$PREFIX_DIR/lib --prefix=$PREFIX_DIR $CONFIGURE_ARGS" >> build.sh
 		echo "$RUN_POST_CONFIGURE" >> build.sh
 
 		if [ -f "$INIT_DIR/packages/$package/post-configure.sh" ]; then
-			echo "$INIT_DIR/packages/$package/post-configure.sh" >> build.sh
+			echo "\"$INIT_DIR/packages/$package/post-configure.sh\"" >> build.sh
 		fi
 
 		echo "make -j $(nproc)" >> build.sh
 
 		if [ -f "$INIT_DIR/packages/$package/custom-make-install.sh" ]; then
-			echo "$INIT_DIR/packages/$package/custom-make-install.sh" >> build.sh
+			echo "\"$INIT_DIR/packages/$package/custom-make-install.sh\"" >> build.sh
 		else
 			echo "make -j $(nproc) install" >> build.sh
 		fi
@@ -275,7 +279,7 @@ setupPackage()
 	fi
 
 	if [ -e "$INIT_DIR/packages/$package/post-install.sh" ]; then
-		echo "$INIT_DIR/packages/$package/post-install.sh" >> build.sh
+		echo "\"$INIT_DIR/packages/$package/post-install.sh\"" >> build.sh
 	fi
 
 	echo 'echo $? > exit_code' >> build.sh
@@ -352,11 +356,16 @@ setupPackages()
 	echo $FILTERED_PACKAGES > "$INIT_DIR/workdir/index"
 
 	for package in $FILTERED_PACKAGES; do
-		packageFullPath=$(ls "$INIT_DIR/built-pkgs/$package-"*"$ARCH.rat" 2> /dev/zero)
-		packageCommitFullPath=$(ls "$INIT_DIR/built-pkgs/$package-"*"$ARCH.commit" 2> /dev/zero)
+		packageFullPath=$(ls -1 "$INIT_DIR/built-pkgs/$package-"*"$ARCH.rat" 2> /dev/null | tail -n 1)
+		packageCommitFullPath=$(ls -1 "$INIT_DIR/built-pkgs/$package-"*"$ARCH.commit" 2> /dev/null | tail -n 1)
 
 		if [ -f "$packageFullPath" ]; then
-			packageCommit=$(cat "$packageCommitFullPath")
+			if [ -z "$REBUILD_PACKAGES" ] || [[ " $REBUILD_PACKAGES " != *" $package "* ]]; then
+				installBuiltPackage "$packageFullPath"
+				continue
+			fi
+
+			packageCommit=$(cat "$packageCommitFullPath" 2>/dev/null || echo "")
 			actualCommit=$(git -C "$INIT_DIR" log -1 --format="%H" -- "packages/$package")
 
 			if [ "$packageCommit" == "$actualCommit" ]; then
@@ -392,8 +401,8 @@ installBuiltPackage()
 {
 	local package=$1
 
-	if [ ! -e "$APP_ROOT_DIR/packages/$(basename $package .rat)" ]; then
-		echo "-- Installing '$(basename $package .rat)'"
+	if [ ! -e "$APP_ROOT_DIR/packages/$(basename "$package" .rat)" ]; then
+		echo "-- Installing '$(basename "$package" .rat)'"
 		mkdir -p $APP_ROOT_DIR/packages
 
 		tar -xf "$package" -C "$APP_ROOT_DIR"
@@ -402,7 +411,7 @@ installBuiltPackage()
 		bash $APP_ROOT_DIR/makeSymlinks.sh
 		rm -f $APP_ROOT_DIR/makeSymlinks.sh
 
-		touch $APP_ROOT_DIR/packages/$(basename $package .rat)
+		touch "$APP_ROOT_DIR/packages/$(basename "$package" .rat)"
 	fi
 }
 
@@ -470,12 +479,12 @@ compileAll()
 
 		if [ "$?" != "0" ]; then
 			echo "- [$packageNum/$packageCount] Package: '"$package"' failed to compile. Check logs"
-			exit 0
+			exit 1
 		fi
 
 		if [ ! -d "$packageDestDirPkg/data/data/com.windroid.emu" ]; then
 			echo "- [$packageNum/$packageCount] Package: '"$package"' failed to compile. Check logs"
-			exit 0
+			exit 1
 		fi
 
 		cp -rf "$packageDestDirPkg/data/data/com.windroid.emu/"* "/data/data/com.windroid.emu"
@@ -492,7 +501,7 @@ compileAll()
 			pkgPrettyName=$package
 		fi
 
-		$INIT_DIR/tools/create-rat-pkg.sh "$package" "$pkgPrettyName" "$vkDriverLib" "$ARCH" "$pkgVersion" "$pkgCategory" "$packageDestDirPkg" "$INIT_DIR/built-pkgs" 0
+		"$INIT_DIR/tools/create-rat-pkg.sh" "$package" "$pkgPrettyName" "$vkDriverLib" "$ARCH" "$pkgVersion" "$pkgCategory" "$packageDestDirPkg" "$INIT_DIR/built-pkgs" 0
 
 		if [ -n "$CI" ]; then
 			rm -rf "$INIT_DIR/workdir/$package"
@@ -537,9 +546,11 @@ export APP_ROOT_DIR=/data/data/com.windroid.emu
 export PREFIX=$APP_ROOT_DIR/files/usr
 
 if [ ! -e "$PREFIX" ]; then
-	sudo mkdir -p "$PREFIX"
-	sudo chown -R $(whoami):$(whoami) "$APP_ROOT_DIR"
-	sudo chmod 755 -R "$APP_ROOT_DIR"
+	mkdir -p "$PREFIX" 2>/dev/null || {
+		sudo mkdir -p "$PREFIX"
+		sudo chown -R $(whoami):$(whoami) "$APP_ROOT_DIR"
+		sudo chmod 755 -R "$APP_ROOT_DIR"
+	}
 fi
 
 export NDK_URL="https://dl.google.com/android/repository/android-ndk-r26b-linux.zip"
