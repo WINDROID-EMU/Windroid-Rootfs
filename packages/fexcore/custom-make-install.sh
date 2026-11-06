@@ -1,31 +1,57 @@
 mkdir -p $DESTDIR/$PREFIX/bin
 mkdir -p $DESTDIR/$PREFIX/etc/fex-emu
+mkdir -p $DESTDIR/$PREFIX/lib/wine/aarch64-unix
+mkdir -p $DESTDIR/$PREFIX/lib/wine/aarch64-windows
 
-if [ -f "Bin/FEXLoader" ]; then
-    cp Bin/FEXLoader $DESTDIR/$PREFIX/bin/
-elif [ -f "FEXLoader" ]; then
-    cp FEXLoader $DESTDIR/$PREFIX/bin/
-fi
-
+# Binarios FEX
 if [ -f "Bin/FEXInterpreter" ]; then
-    cp Bin/FEXInterpreter $DESTDIR/$PREFIX/bin/
+    cp -f Bin/FEXInterpreter $DESTDIR/$PREFIX/bin/
 elif [ -f "FEXInterpreter" ]; then
-    cp FEXInterpreter $DESTDIR/$PREFIX/bin/
+    cp -f FEXInterpreter $DESTDIR/$PREFIX/bin/
 fi
 
 if [ -f "Bin/FEXServer" ]; then
-    cp Bin/FEXServer $DESTDIR/$PREFIX/bin/
+    cp -f Bin/FEXServer $DESTDIR/$PREFIX/bin/
 elif [ -f "FEXServer" ]; then
-    cp FEXServer $DESTDIR/$PREFIX/bin/
+    cp -f FEXServer $DESTDIR/$PREFIX/bin/
 fi
+
+# FEXLoader launcher script com suporte a execucao ELF x86_64 via box64 no Android ARM64
+cat << 'EOF' > $DESTDIR/$PREFIX/bin/FEXLoader
+#!/bin/sh
+export FEX_ROOTFS="${FEX_ROOTFS:-/data/data/com.windroid.emu/files/usr}"
+export FEX_CONFIG_DIR="${FEX_CONFIG_DIR:-/data/data/com.windroid.emu/files/usr/etc/fex-emu}"
+
+if [ "$1" = "--" ]; then
+    shift
+fi
+
+BOX64_BIN=$(which box64 2>/dev/null)
+if [ -z "$BOX64_BIN" ] || [ ! -x "$BOX64_BIN" ]; then
+    BOX64_BIN=$(ls -d /data/data/com.windroid.emu/files/packages/Box64*/files/usr/bin/box64 2>/dev/null | head -n 1)
+fi
+
+if [ -n "$BOX64_BIN" ] && [ -x "$BOX64_BIN" ]; then
+    exec "$BOX64_BIN" "$@"
+else
+    exec "$@"
+fi
+EOF
+chmod +x $DESTDIR/$PREFIX/bin/FEXLoader
+ln -sf FEXLoader $DESTDIR/$PREFIX/bin/FEXInterpreter 2>/dev/null || true
+ln -sf FEXLoader $DESTDIR/$PREFIX/bin/FEX 2>/dev/null || true
+
+# Copia de bibliotecas WoW64 / ARM64EC caso geradas pelo build
+find . -name "lib*fex*.so" -exec cp -f {} $DESTDIR/$PREFIX/lib/wine/aarch64-unix/ \; 2>/dev/null || true
+find . -name "lib*fex*.dll" -exec cp -f {} $DESTDIR/$PREFIX/lib/wine/aarch64-windows/ \; 2>/dev/null || true
 
 cat << 'EOF' > $DESTDIR/$PREFIX/etc/fex-emu/Config.json
 {
   "Config": {
     "SilentLog": 1,
     "TSOEnabled": 1,
-    "MultiBlock": 1
+    "MultiBlock": 1,
+    "X87ReducedPrecision": 1
   }
 }
 EOF
-
