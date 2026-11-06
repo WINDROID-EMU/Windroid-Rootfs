@@ -101,7 +101,6 @@ for i in "${PKG_LIST[@]}"; do
       cp -f "$resolvedPath" "box64"
     elif [ "$packageCategory" == "FEXCore" ]; then
       cp -f "$resolvedPath" "fexcore"
-      cp -f "$resolvedPath" "box64"
     elif [ "$packageCategory" == "Wine" ]; then
       cp -f "$resolvedPath" "wine"
     elif [ "$packageCategory" == "AdrenoTools" ]; then

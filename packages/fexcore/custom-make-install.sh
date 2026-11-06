@@ -26,9 +26,18 @@ if [ "$1" = "--" ]; then
     shift
 fi
 
-BOX64_BIN=$(which box64 2>/dev/null)
+BOX64_BIN=""
+if command -v box64 >/dev/null 2>&1; then
+    BOX64_BIN="$(command -v box64)"
+fi
+
 if [ -z "$BOX64_BIN" ] || [ ! -x "$BOX64_BIN" ]; then
-    BOX64_BIN=$(ls -d /data/data/com.windroid.emu/files/packages/Box64*/files/usr/bin/box64 2>/dev/null | head -n 1)
+    for candidate in /data/data/com.windroid.emu/files/packages/Box64*/files/usr/bin/box64; do
+        if [ -x "$candidate" ]; then
+            BOX64_BIN="$candidate"
+            break
+        fi
+    done
 fi
 
 if [ -n "$BOX64_BIN" ] && [ -x "$BOX64_BIN" ]; then
