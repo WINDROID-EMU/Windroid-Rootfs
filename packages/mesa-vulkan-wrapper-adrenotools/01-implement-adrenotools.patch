@@ -1,6 +1,6 @@
 diff -uNr mesa-vulkan-wrapper/src/vulkan/wrapper/wrapper_instance.c mesa-vulkan-wrapper-adreno-tools/src/vulkan/wrapper/wrapper_instance.c
 --- mesa-vulkan-wrapper/src/vulkan/wrapper/wrapper_instance.c	2025-02-22 00:17:54.436045057 +0000
-+++ mesa-vulkan-wrapper-adreno-tools/src/vulkan/wrapper/wrapper_instance.c	2025-02-22 00:22:51.479558550 +0000
++++ mesa-vulkan-wrapper-adreno-tools/src/vulkan/wrapper/wrapper_instance.c	2026-11-11 00:00:00.000000000 +0000
 @@ -4,6 +4,7 @@
  #include "vk_common_entrypoints.h"
  #include "vk_dispatch_table.h"
@@ -9,7 +9,7 @@ diff -uNr mesa-vulkan-wrapper/src/vulkan/wrapper/wrapper_instance.c mesa-vulkan-
  
  const struct vk_instance_extension_table wrapper_instance_extensions = {
     .KHR_get_surface_capabilities2 = true,
-@@ -53,9 +54,43 @@
+@@ -53,23 +54,74 @@
     if (vulkan_library_handle)
        return true;
  
@@ -20,6 +20,7 @@ diff -uNr mesa-vulkan-wrapper/src/vulkan/wrapper/wrapper_instance.c mesa-vulkan-
 +   char *custom_driver_dir = getenv("ADRENOTOOLS_CUSTOM_DRIVER_DIR");
 +   char *custom_driver_name = getenv("ADRENOTOOLS_CUSTOM_DRIVER_NAME");
 +   char *file_redirect_dir = getenv("ADRENOTOOLS_FILE_REDIRECT_DIR");
++   char *tmp_lib_dir = getenv("ADRENOTOOLS_TMP_DIR");
 +
 +   if (hook_lib_dir == NULL) {
 +        hook_lib_dir = "/data/data/com.windroid.emu/files/usr/lib/";
@@ -27,6 +28,10 @@ diff -uNr mesa-vulkan-wrapper/src/vulkan/wrapper/wrapper_instance.c mesa-vulkan-
 +
 +   if (custom_driver_dir == NULL) {
 +        custom_driver_dir = "/data/data/com.windroid.emu/files/home/hook/";
++   }
++
++   if (tmp_lib_dir == NULL) {
++        tmp_lib_dir = getenv("TMPDIR");
 +   }
 +
 +   char *use_adrenotools = getenv("USE_ADRENOTOOLS");
@@ -44,7 +49,7 @@ diff -uNr mesa-vulkan-wrapper/src/vulkan/wrapper/wrapper_instance.c mesa-vulkan-
 +          adrenotools_flags |= ADRENOTOOLS_DRIVER_CUSTOM;
 +      }
 +
-+      vulkan_library_handle = adrenotools_open_libvulkan(RTLD_NOW, adrenotools_flags, NULL, hook_lib_dir,
++      vulkan_library_handle = adrenotools_open_libvulkan(RTLD_NOW, adrenotools_flags, tmp_lib_dir, hook_lib_dir,
 +                                               custom_driver_dir, custom_driver_name,
 +                                               file_redirect_dir, &adrenotools_mapping_handle);
 +
@@ -55,4 +60,36 @@ diff -uNr mesa-vulkan-wrapper/src/vulkan/wrapper/wrapper_instance.c mesa-vulkan-
 +   }
  
     if (vulkan_library_handle) {
++      get_instance_proc_addr = dlsym(vulkan_library_handle,
++                                     "vkGetInstanceProcAddr");
        create_instance = dlsym(vulkan_library_handle, "vkCreateInstance");
+-      get_instance_proc_addr = dlsym(vulkan_library_handle,
+-                                     "vkGetInstanceProcAddr");
++      if (!create_instance && get_instance_proc_addr) {
++         create_instance = (PFN_vkCreateInstance)get_instance_proc_addr(NULL, "vkCreateInstance");
++      }
+       enumerate_instance_version = dlsym(vulkan_library_handle,
+                                          "vkEnumerateInstanceVersion");
++      if (!enumerate_instance_version && get_instance_proc_addr) {
++         enumerate_instance_version = (PFN_vkEnumerateInstanceVersion)get_instance_proc_addr(NULL, "vkEnumerateInstanceVersion");
++      }
+       enumerate_instance_extension_properties =
+          dlsym(vulkan_library_handle, "vkEnumerateInstanceExtensionProperties");
++      if (!enumerate_instance_extension_properties && get_instance_proc_addr) {
++         enumerate_instance_extension_properties = (PFN_vkEnumerateInstanceExtensionProperties)get_instance_proc_addr(NULL, "vkEnumerateInstanceExtensionProperties");
++      }
+    }
+    else {
+       fprintf(stderr, "%s", dlerror());
+    }
+@@ -118,6 +170,10 @@
+    if (!vulkan_library_init())
+       return vk_error(NULL, VK_ERROR_INCOMPATIBLE_DRIVER);
+ 
++   if (!enumerate_instance_version) {
++      *pApiVersion = VK_MAKE_VERSION(1, 3, 0);
++      return VK_SUCCESS;
++   }
+    return enumerate_instance_version(pApiVersion);
+ }
+ 
