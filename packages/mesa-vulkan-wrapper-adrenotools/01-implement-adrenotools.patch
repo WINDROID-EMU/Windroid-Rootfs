@@ -1,6 +1,6 @@
-diff -uNr mesa-vulkan-wrapper/src/vulkan/wrapper/wrapper_instance.c mesa-vulkan-wrapper-adreno-tools/src/vulkan/wrapper/wrapper_instance.c
---- mesa-vulkan-wrapper/src/vulkan/wrapper/wrapper_instance.c	2025-02-22 00:17:54.436045057 +0000
-+++ mesa-vulkan-wrapper-adreno-tools/src/vulkan/wrapper/wrapper_instance.c	2026-11-11 00:00:00.000000000 +0000
+diff -uNr a/src/vulkan/wrapper/wrapper_instance.c b/src/vulkan/wrapper/wrapper_instance.c
+--- a/src/vulkan/wrapper/wrapper_instance.c	2025-02-22 00:17:54.436045057 +0000
++++ b/src/vulkan/wrapper/wrapper_instance.c	2026-11-11 00:00:00.000000000 +0000
 @@ -4,6 +4,7 @@
  #include "vk_common_entrypoints.h"
  #include "vk_dispatch_table.h"
@@ -9,7 +9,7 @@ diff -uNr mesa-vulkan-wrapper/src/vulkan/wrapper/wrapper_instance.c mesa-vulkan-
  
  const struct vk_instance_extension_table wrapper_instance_extensions = {
     .KHR_get_surface_capabilities2 = true,
-@@ -53,23 +54,74 @@
+@@ -53,18 +54,66 @@
     if (vulkan_library_handle)
        return true;
  
@@ -60,11 +60,10 @@ diff -uNr mesa-vulkan-wrapper/src/vulkan/wrapper/wrapper_instance.c mesa-vulkan-
 +   }
  
     if (vulkan_library_handle) {
-+      get_instance_proc_addr = dlsym(vulkan_library_handle,
-+                                     "vkGetInstanceProcAddr");
-       create_instance = dlsym(vulkan_library_handle, "vkCreateInstance");
--      get_instance_proc_addr = dlsym(vulkan_library_handle,
--                                     "vkGetInstanceProcAddr");
+-      create_instance = dlsym(vulkan_library_handle, "vkCreateInstance");
+       get_instance_proc_addr = dlsym(vulkan_library_handle,
+                                      "vkGetInstanceProcAddr");
++      create_instance = dlsym(vulkan_library_handle, "vkCreateInstance");
 +      if (!create_instance && get_instance_proc_addr) {
 +         create_instance = (PFN_vkCreateInstance)get_instance_proc_addr(NULL, "vkCreateInstance");
 +      }
@@ -81,8 +80,7 @@ diff -uNr mesa-vulkan-wrapper/src/vulkan/wrapper/wrapper_instance.c mesa-vulkan-
     }
     else {
        fprintf(stderr, "%s", dlerror());
-    }
-@@ -118,6 +170,10 @@
+@@ -124,6 +173,11 @@
     if (!vulkan_library_init())
        return vk_error(NULL, VK_ERROR_INCOMPATIBLE_DRIVER);
  
@@ -90,6 +88,7 @@ diff -uNr mesa-vulkan-wrapper/src/vulkan/wrapper/wrapper_instance.c mesa-vulkan-
 +      *pApiVersion = VK_MAKE_VERSION(1, 3, 0);
 +      return VK_SUCCESS;
 +   }
++
     return enumerate_instance_version(pApiVersion);
  }
  

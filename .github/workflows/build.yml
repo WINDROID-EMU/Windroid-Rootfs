@@ -45,6 +45,7 @@ jobs:
           curl -LO# https://github.com/WINDROID-EMU/Windroid-Rootfs/releases/download/$LATEST_TAG/Windroid-Packages.zip || true
           sudo unzip -o Windroid-Packages.zip -d /mnt/arch/Windroid-RootFS-Generator/built-pkgs || true
           rm -f Windroid-Packages.zip
+          sudo rm -f /mnt/arch/Windroid-RootFS-Generator/built-pkgs/mesa-vulkan-wrapper-adrenotools*
         else
           echo "No previous releases found, performing clean build"
         fi
